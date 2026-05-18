@@ -1,17 +1,29 @@
 # PyPI Publish Workflow — Trusted Publishing (OIDC)
 #
-# Trigger: workflow_dispatch only (manual, per @devops 2026-05-18 decision).
-# AC-2 in STORY-001.3 originally specified 'on: push: tags: [v*.*.*]' but the
-# operator scoped 001.3 to require an explicit human gate via 'gh workflow run'.
-# Tag-triggered auto-publish can be added later by uncommenting the 'push: tags'
-# block below.
+# ⚠️ IP-PROTECTION STATUS (2026-05-18): The claude-i repository is PERMANENTLY
+# PRIVATE and PyPI publication is PERMANENTLY FORBIDDEN. See NOTES.md
+# § IP Status — Private Forever for the canonical decision and unlock procedure.
 #
-# Requirements (one-time, operator):
+# This workflow remains in the repo as future-proof infrastructure but is
+# guarded by a required confirmation string input that makes accidental
+# dispatch IMPOSSIBLE. Even an operator clicking "Run workflow" in the
+# GitHub UI cannot publish without typing the exact 49-character
+# confirmation token.
+#
+# Tag-triggered auto-publish (`on: push: tags: [v*.*.*]`) is deliberately
+# OMITTED — re-enabling it would bypass the confirm_release input guard.
+# DO NOT add a push:tags trigger without first updating NOTES.md
+# § IP Status — Private Forever.
+#
+# Trigger: workflow_dispatch only, with mandatory confirm_release string.
+#
+# Requirements (one-time, operator — only relevant if IP status is reversed):
 #   1. PyPI Pending Publisher configured for repository=rafaelscosta/claude-i,
 #      workflow=publish.yml, environment=publish (see
 #      docs/guides/pypi-trusted-publishing.md).
-#   2. GitHub 'publish' environment created in repo Settings → Environments
-#      with rafaelscosta as required reviewer.
+#   2. GitHub 'publish' environment already created in repo Settings →
+#      Environments (done 2026-05-18 via `gh api`, restricted to main
+#      branch + v*.*.* tags).
 #
 # No long-lived API secrets are referenced — authentication is exclusively via
 # OIDC (id-token: write permission below).
@@ -20,10 +32,19 @@ name: publish
 
 on:
   workflow_dispatch:
-  # Future activation: tag-triggered publish.
-  # push:
-  #   tags:
-  #     - "v*.*.*"
+    inputs:
+      confirm_release:
+        description: |
+          MUST be exactly: I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE
+
+          ⚠️ Publishing makes the wheel + sdist available on pypi.org WORLDWIDE.
+          The sdist contains src/. PyPI versions are PERMANENT.
+
+          Repo is currently IP-protected (private). Publishing CONTRADICTS that status.
+          DO NOT run this workflow unless the IP status has formally changed
+          (see NOTES.md § IP Status — Private Forever).
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -36,6 +57,23 @@ jobs:
     environment: publish
 
     steps:
+      - name: Safety guard — confirm release string
+        run: |
+          if [ "${{ inputs.confirm_release }}" != "I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE" ]; then
+            echo "❌ Safety guard FAILED."
+            echo "Provided: '${{ inputs.confirm_release }}'"
+            echo "Required: 'I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE'"
+            echo ""
+            echo "This workflow PERMANENTLY publishes claude-i to public PyPI."
+            echo "Repo is currently IP-protected (private). Publishing breaks that."
+            echo ""
+            echo "If IP status has formally changed and you intend to publish:"
+            echo "  1. Update NOTES.md § IP Status — Private Forever"
+            echo "  2. Re-run with confirm_release set EXACTLY as documented"
+            exit 1
+          fi
+          echo "✓ Confirmation string verified. Proceeding with PyPI publish."
+
       - name: Checkout
         uses: actions/checkout@v4
 

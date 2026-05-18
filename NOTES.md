@@ -235,3 +235,35 @@ These match the wheel and sdist uploaded to the v0.2.0 GitHub Release.
 The sdist SHA also matches the `v0.2.0-pre` dev-pass artifact referenced
 in the homebrew-claude-i `Formula/claude-i.rb` `url` field (intentional —
 same tarball content).
+
+
+## IP Status — Private Forever (as of 2026-05-18)
+
+**Decision (operator, 2026-05-18):** claude-i is IP-protected.
+- Repository: PERMANENTLY PRIVATE
+- PyPI publication: PERMANENTLY FORBIDDEN
+- Public Homebrew formula: PERMANENTLY FORBIDDEN
+- The `publish.yml` workflow remains in the repo but is guarded by a required confirmation string that makes accidental dispatch impossible.
+
+**Reason:** Code contains IP that must not be exposed publicly. The sdist artifact (which PyPI publishing produces) contains `src/` and would constitute a leak.
+
+**Distribution path that respects IP status:**
+- GitHub Release v0.2.0 with .whl + .tar.gz assets (private repo — only collaborators with read access can download)
+- `pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.0` (gh CLI authenticated)
+
+**Technical enforcement in place:**
+
+1. **`publish.yml` confirm_release input** — `workflow_dispatch` requires the exact 49-character string `I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE`. Empty or wrong values fail the first step before any build/publish runs. Validated 2026-05-18.
+2. **GitHub `publish` environment** — created 2026-05-18 via `gh api`, restricted via `deployment_branch_policy` to `main` branch and `v*.*.*` tags only. Required reviewers not available on Free plan for private repos; the input guard compensates.
+3. **No `push: tags` trigger** — deliberately omitted from `publish.yml`. Tag-triggered dispatch would have no `inputs.confirm_release` to validate and would bypass the guard. Re-introducing it requires updating this section first.
+4. **NOTES.md visibility** — this section is the source of truth read by both operator and any future @devops agent before invoking publish.
+
+**Conditions to reverse this decision:**
+
+The IP-protected status is set by operator (rafaelscosta). To unlock public distribution:
+1. Operator explicitly updates this section with a new decision date + rationale.
+2. Operator runs `gh workflow run publish.yml --ref v0.2.0 --field confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE`.
+3. Operator configures PyPI Pending Publisher (see § Private Distribution Phase § Operator checklist).
+4. Operator flips repo to PUBLIC (optional but recommended for transparency).
+
+This section is the source of truth. The workflow guard is the technical enforcement.
