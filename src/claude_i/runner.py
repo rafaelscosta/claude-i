@@ -81,11 +81,20 @@ def tmux(
     The single call site that MUST pass ``env=_sanitized_env()`` is the
     ``new-session`` call in ``run()`` — that is the only path that spawns
     a long-lived process tree underneath claude-i. See module docstring.
+
+    G13 — explicit ``encoding="utf-8"`` and ``errors="replace"`` ensure
+    PT-BR accents and other multi-byte chars survive the prompt → tmux
+    set-buffer round trip even on headless Linux systems where the
+    default locale is ASCII. ``errors="replace"`` is best-effort: a
+    truly un-encodable byte becomes ``U+FFFD`` rather than crashing the
+    subprocess pipe.
     """
     return subprocess.run(
         ["tmux", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=check,
         env=env,
     )
@@ -197,6 +206,20 @@ def run(
     try:
         # Let the TUI come up.
         time.sleep(ready_wait)
+
+        # G13 — best-effort UTF-8 round-trip check on the prompt. If the
+        # string cannot be encoded in UTF-8 (extremely rare — would
+        # require lone surrogates), log a warning and proceed; the
+        # subprocess pipe is configured with errors="replace" so the
+        # downstream call will not crash.
+        try:
+            prompt.encode("utf-8")
+        except UnicodeEncodeError as err:
+            print(
+                f"claude-i: warning — prompt contains characters that "
+                f"cannot be encoded as UTF-8 (will be replaced): {err}",
+                file=sys.stderr,
+            )
 
         # Paste the prompt (multiline-safe) and submit.
         tmux("set-buffer", "-b", session, prompt)
