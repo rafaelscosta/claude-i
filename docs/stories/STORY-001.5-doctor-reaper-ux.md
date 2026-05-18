@@ -261,6 +261,7 @@ As an operator running `claude-i` in scripts and pipelines, I want self-diagnost
 | 2026-05-17 | @sm (River) | Initial draft |
 | 2026-05-18 | @po (Pax) | Validated 6/10 [NO-GO pending C-1/C-2/C-3 resolution]. Context: Epic 001, 5 prior stories Done (96/94/95/94/92). D10: 3 divergences found (Task 6.3 IDS / AC-4 semantic / runner.run signature), 5 auto-fixes applied (owner+executor+QG+accountable+deploy_type). Conditions: C-4 AC-1(e) age qualifier, C-5 G14 time-box pattern. Epic-close decision: separate ceremony recommended (5-step split post-001.5-close). |
 | 2026-05-18 | @qa (Quinn) | Quality gate **CONCERNS** (80/100). 84/84 pytest PASS, ruff clean, mypy --strict clean (8 sources). All 3 @po NO-GO findings (C-1/C-2/C-3) genuinely resolved. AC-1/2/5/6/7 fully met; AC-3/4 met with minor exit-code drift (1 vs 2 — defensible per G8 hardening); **AC-8 partially unmet** (G15 ✓, G14 ✗ — zero tests, not even a deferral marker). Top gaps: Tasks 6.2/6.3/6.7 promised 4–5 tests in `test_hook.py` / `test_cli.py` / `test_runner.py` for `remove_hook`, `cmd_reap` wiring, and G14 graceful handling — none delivered despite `[x]` checkboxes. Functionality works (verified by hand); gap is test coverage debt + checkbox accuracy. Gate file: `docs/gates/STORY-001.5-gate.md`. Epic-close v0.2.0 tag ceremony is **UNBLOCKED** (no security/data-loss risk). Recommend Path A (@dev adds 4 tests in ~30 min → re-gate to PASS) or Path B (@po accepts CONCERNS, logs test debt in epic-close notes). |
+| 2026-05-18 | @qa (Quinn) | **Re-gate PASS (95/100)**. Path A verified end-to-end. All 5 issues resolved (Q-1 G14 deferral marker test, Q-2 remove_hook tests, Q-3 cmd_reap tests, Q-4 AC-3/AC-4 exit code text aligned with impl, Q-5 checkbox accuracy). Fresh-venv re-run: pytest 89/89, ruff clean, mypy `--strict` clean (8 src files), seed/reaper integrity preserved, G4/G7/G8 contracts intact. All 8 ACs fully met. Gate file updated. Ready for @devops push → @po close → epic-close ceremony. |
 | 2026-05-18 | @dev (Dex) | **Path A executed** (re-gate prep). Q-1/Q-2/Q-3 closed: +5 tests landed (commit `36f6ad9`) — `test_hook.py::test_remove_hook_removes_only_claude_i_entry`, `test_hook.py::test_remove_hook_noop_when_not_installed`, `test_hook.py::test_subagent_stop_deferred` (G14 deferral marker pinning NOTES.md § 'STORY-001.5 — G14 SubagentStop Deferred'), `test_cli.py::test_reap_subcommand_calls_reap_orphans`, `test_cli.py::test_reap_subcommand_zero_count_exits_0`. Pytest 89/89 PASS, ruff clean, mypy --strict clean (8 src files), G4 contract pair intact. Q-4 closed: AC-3/AC-4 exit codes updated to `CONFIG_ERROR (2)` to match impl (G8 hardening convention). Q-5 closed: Task 6.7 test reference updated to point at the deferral marker test in `test_hook.py`. No `src/` changes. Ready for re-gate (expected PASS). |
 
 ## QA Results
@@ -351,3 +352,44 @@ Story owner (@po) decides between:
 - **Path B (acceptable):** @po accepts CONCERNS as-written, logs the 3 missing test groups in EPIC-001 close notes, ships v0.2.0 with test debt visible.
 
 **Either path unblocks the v0.2.0 tag ceremony.** No security or data-loss risk surface.
+
+---
+
+### Re-Review Date: 2026-05-18 (Path A complete)
+
+### Reviewed By: Quinn (Test Architect)
+
+### Re-gate Verdict: PASS — 95 / 100
+
+@dev executed Path A. All 5 issues from the initial CONCERNS verdict are resolved:
+
+- **Q-1 ✅** — `tests/test_hook.py::test_subagent_stop_deferred` lands (commit `36f6ad9`). Pins NOTES.md § 'STORY-001.5 — G14 SubagentStop Deferred' header + `SubagentStop` keyword + `DEFERRED` label. AC-8 G14 obligation closed via deferral marker (same pattern as G2 in STORY-001.1).
+- **Q-2 ✅** — `test_hook.py::test_remove_hook_removes_only_claude_i_entry` (line 306) + `test_hook.py::test_remove_hook_noop_when_not_installed` (line 367) both delivered.
+- **Q-3 ✅** — `test_cli.py::test_reap_subcommand_calls_reap_orphans` (line 537) + `test_cli.py::test_reap_subcommand_zero_count_exits_0` (line 574) both delivered.
+- **Q-4 ✅** — AC-3 and AC-4 now reference `CONFIG_ERROR` (`2`) explicitly, citing STORY-001.2 G8 hardening and STORY-001.1 AC-3 alignment. Story text matches impl.
+- **Q-5 ✅** — Task 6.7 test reference updated to point at the delivered `test_subagent_stop_deferred` marker in `test_hook.py`. Checkbox accuracy restored.
+
+### Re-run gates (fresh venv, 2026-05-18)
+
+- pytest **89 passed** in 0.26s (was 84; +5 net follow-ups)
+- ruff: All checks passed
+- mypy `--strict`: Success — no issues in 8 source files
+- `claude-i --version` → `claude-i 0.2.0` (G4 contract intact)
+- `seed/claude-i` diff vs `3a2be40` (STORY-001.0): empty
+- `src/claude_i/reaper.py` diff vs `ce6c50a` (001.4 close): empty (C-1 IDS resolution holds; G6 atexit reaper untouched)
+- G4 sentinel sanitization, G7 flock parity, G8 named exit codes: all INTACT
+
+### Acceptance Criteria Status (post-Path-A)
+
+All 8 ACs fully met. AC-3 and AC-4 text now aligned with impl; AC-8 covered (G15 functional + G14 deferral marker).
+
+### Gate Status (re-gate)
+
+Gate: **PASS** → `docs/gates/STORY-001.5-gate.md`
+Quality Score: **95 / 100**
+
+### Recommended Status (re-gate)
+
+**[✓ Ready for Done]**
+
+Handoff: @devops `*push` (`36f6ad9`, `e130d8f`) → @po `*close-story STORY-001.5` → @po `*close-epic EPIC-001` ceremony (v0.2.0 tag, PyPI publish, Homebrew Formula flip, brew smoke, Epic DoD).

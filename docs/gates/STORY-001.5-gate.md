@@ -4,13 +4,64 @@
 |---|---|
 | Story | STORY-001.5 — Doctor, Reaper, UX: Subcommands, JSON Output, Readiness Polling, G10-G17 Tests |
 | Epic | EPIC-001 |
-| Gate | **CONCERNS** |
-| Quality Score | **80 / 100** |
+| Gate | **PASS** (re-gate; was CONCERNS 80/100) |
+| Quality Score | **95 / 100** |
 | Reviewer | Quinn (Test Architect) |
-| Review Date | 2026-05-18 |
-| Reviewed Commits | `56b2019`, `ed5ca7d`, `3b6edd1`, `c3abdd0`, `edeadc2`, `8e025b0`, `733be58` (7 ahead of `origin/main` on top of 001.4 close) |
+| Review Date | 2026-05-18 (re-gate) |
+| Reviewed Commits | initial: `56b2019`, `ed5ca7d`, `3b6edd1`, `c3abdd0`, `edeadc2`, `8e025b0`, `733be58`; re-gate: `36f6ad9` (Q-1/Q-2/Q-3 tests), `e130d8f` (Q-4/Q-5 doc fixes) |
 | Risk Profile | deep — final story of EPIC-001, public subcommand surface, signature-breaking refactor (`runner.run()` tuple migration), no CodeRabbit (skipped per mission scope), 8 ACs |
 | Expires | 2026-06-01 |
+
+## Re-gate Verdict (2026-05-18, post-Path-A)
+
+**PASS — 95/100.** All 5 issues from initial CONCERNS verdict resolved.
+
+| Issue | Resolution | Evidence |
+|---|---|---|
+| Q-1 (MEDIUM, G14) | `tests/test_hook.py::test_subagent_stop_deferred` lands (commit `36f6ad9`). Test pins NOTES.md § 'STORY-001.5 — G14 SubagentStop Deferred' header + `SubagentStop` keyword + `DEFERRED` label. If anyone removes the deferral record, this test fires and re-opens the gap. **AC-8 G14 obligation closed via deferral marker.** | ✅ RESOLVED |
+| Q-2 (MEDIUM, remove_hook) | `test_hook.py::test_remove_hook_removes_only_claude_i_entry` (line 306) + `test_hook.py::test_remove_hook_noop_when_not_installed` (line 367) both land in `36f6ad9`. | ✅ RESOLVED |
+| Q-3 (MEDIUM, cmd_reap) | `test_cli.py::test_reap_subcommand_calls_reap_orphans` (line 537) + `test_cli.py::test_reap_subcommand_zero_count_exits_0` (line 574) both land in `36f6ad9`. | ✅ RESOLVED |
+| Q-4 (LOW, AC-3/AC-4 exit codes) | AC-3 and AC-4 now reference `CONFIG_ERROR` (`2`) explicitly with rationale citing STORY-001.2 G8 hardening and STORY-001.1 AC-3 alignment. Story text matches impl. | ✅ RESOLVED |
+| Q-5 (LOW, checkbox accuracy) | Task 6.7 test row now points at the delivered `test_subagent_stop_deferred` marker in `test_hook.py` (not the missing `test_runner.py::test_subagent_stop_payload_handled_gracefully`). File List reflects actual delivery. | ✅ RESOLVED |
+
+### Re-run gates (fresh venv, 2026-05-18)
+
+| Gate | Result |
+|---|---|
+| `python3 -m venv` + `pip install -e ".[dev]"` (Python 3.14) | exit 0 |
+| `pytest tests/` | **89 passed** in 0.26s (was 84; +5 net follow-ups) |
+| `ruff check .` | All checks passed |
+| `mypy --strict src/` | Success: no issues in 8 source files |
+| `claude-i --version` | `claude-i 0.2.0` (G4 contract intact) |
+| `git diff 3a2be40 HEAD -- seed/claude-i` | empty (seed verbatim from STORY-001.0) |
+| `git diff ce6c50a..HEAD -- src/claude_i/reaper.py` | empty (C-1 IDS resolution holds; G6 atexit reaper untouched) |
+| G4 sentinel sanitization (runner.py:370 prefix + line 391 `_sanitized_env()`) | INTACT |
+| G7 flock parity (`remove_hook` uses same `_settings_flock` as `install_hook`) | INTACT |
+| G8 exit codes (named constants throughout `cmd_doctor`/`cmd_uninstall`/`cmd_reap`) | INTACT |
+
+### Acceptance Criteria Verification (post-Path-A)
+
+All 8 ACs now fully met: AC-1 ✓, AC-2 ✓, AC-3 ✓ (text aligned with impl), AC-4 ✓ (text aligned with impl), AC-5 ✓, AC-6 ✓, AC-7 ✓, **AC-8 ✓** (G15 covered + G14 deferral marker test pins NOTES.md record).
+
+### Quality Score Calculation (re-gate)
+
+- 0 FAILs, 1 minor CONCERNS remaining (Reliability NFR — G14 functional handling is deferred per documented investigation, only the deferral marker is tested; this is a known epic-level deferral, same pattern as G2 in STORY-001.1).
+- Score: `100 - (5 × 1) = 95`.
+- Two LOW items from initial review (Q-4, Q-5) both resolved (not deducted; LOW = note only).
+
+### Recommended Next
+
+- @devops `*push` final 001.5 commits (`36f6ad9`, `e130d8f`) → main
+- @po `*close-story STORY-001.5` (mark Done, PASS gate accepted)
+- @po `*close-epic EPIC-001` ceremony: v0.2.0 tag → `gh workflow run publish.yml` → Task 5.9 Homebrew Formula URL flip → operator brew smoke → Epic DoD verification
+
+### Status (re-gate)
+
+**[✓ Approved — Ready for Done]**
+
+---
+
+## Original CONCERNS verdict (preserved for audit trail)
 
 ## Status Reason
 
