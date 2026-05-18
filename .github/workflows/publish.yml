@@ -1,0 +1,63 @@
+# PyPI Publish Workflow — Trusted Publishing (OIDC)
+#
+# Trigger: workflow_dispatch only (manual, per @devops 2026-05-18 decision).
+# AC-2 in STORY-001.3 originally specified 'on: push: tags: [v*.*.*]' but the
+# operator scoped 001.3 to require an explicit human gate via 'gh workflow run'.
+# Tag-triggered auto-publish can be added later by uncommenting the 'push: tags'
+# block below.
+#
+# Requirements (one-time, operator):
+#   1. PyPI Pending Publisher configured for repository=rafaelscosta/claude-i,
+#      workflow=publish.yml, environment=publish (see
+#      docs/guides/pypi-trusted-publishing.md).
+#   2. GitHub 'publish' environment created in repo Settings → Environments
+#      with rafaelscosta as required reviewer.
+#
+# No long-lived API secrets are referenced — authentication is exclusively via
+# OIDC (id-token: write permission below).
+
+name: publish
+
+on:
+  workflow_dispatch:
+  # Future activation: tag-triggered publish.
+  # push:
+  #   tags:
+  #     - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write  # Required for PyPI Trusted Publishing (OIDC)
+
+jobs:
+  publish-to-pypi:
+    name: build + publish to PyPI
+    runs-on: ubuntu-latest
+    environment: publish
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Publish to PyPI (Trusted Publishing / OIDC)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # No password parameter — OIDC is the only auth path. The action
+        # mints a short-lived token from the GitHub OIDC provider and
+        # exchanges it with pypi.org's Trusted Publisher endpoint.
