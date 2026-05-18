@@ -175,14 +175,25 @@ def test_install_hook_preserves_existing_hooks(
 
 
 def test_install_hook_refuses_malformed_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``install_hook`` exits rather than corrupting a malformed settings file."""
+    """``install_hook`` exits with CONFIG_ERROR (2) on malformed settings.json.
+
+    STORY-001.2 G8 / Task 3.8: this migrated from a string-form ``sys.exit``
+    (exit code 1) to a named constant ``CONFIG_ERROR`` (exit code 2). The
+    1→2 change is the intended semantic correction — malformed settings IS
+    a config error, not a runtime error. The error message moves from the
+    SystemExit message field to stderr.
+    """
     target = _redirect_settings(tmp_path, monkeypatch)
     target.write_text("{not: json")
     with pytest.raises(SystemExit) as exc:
         hook.install_hook()
-    assert "not valid JSON" in str(exc.value)
+    assert exc.value.code == 2, (
+        f"malformed JSON must exit CONFIG_ERROR (2); got {exc.value.code}"
+    )
+    captured = capsys.readouterr()
+    assert "not valid JSON" in captured.err
 
 
 def test_install_then_detect_roundtrip(

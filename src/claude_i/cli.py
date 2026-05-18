@@ -13,9 +13,28 @@ full implementations land in STORY-001.5.
 from __future__ import annotations
 
 import argparse
+import sys
 from importlib.metadata import version as _pkg_version
 
 from claude_i import deps, hook, runner
+from claude_i.exit_codes import (
+    CONFIG_ERROR,
+    PLATFORM_ERROR,
+    RUNTIME_ERROR,
+    SUCCESS,
+)
+
+# Re-export so test_cli.py can monkeypatch through the cli module if it wants.
+__all__ = [
+    "CONFIG_ERROR",
+    "PLATFORM_ERROR",
+    "RUNTIME_ERROR",
+    "SUCCESS",
+    "doctor",
+    "main",
+    "reap",
+    "uninstall",
+]
 
 
 def _version_string() -> str:
@@ -44,11 +63,14 @@ def _build_parser() -> argparse.ArgumentParser:
         # AC-8 / Task 2.8 — document exit codes in --help output. The epilog
         # renders verbatim after the standard options block.
         # G6 (STORY-001.2) adds the SIGKILL caveat for tmux session cleanup.
+        # G8 (STORY-001.2) extends the exit code list to include the new
+        # PLATFORM_ERROR (3) emitted by ``deps.assert_not_windows`` (G9).
         epilog=(
             "Exit codes:\n"
             "  0  success\n"
             "  1  runtime error (timeout, parse failure)\n"
             "  2  missing dependency or config error\n"
+            "  3  unsupported platform (native Windows; use WSL2)\n"
             "\n"
             "Notes:\n"
             "  On normal exit, KeyboardInterrupt, or SIGTERM, the tmux session\n"
@@ -98,6 +120,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "bypassPermissions, default, plan."
         ),
     )
+    # G8 — caller opts into accepting an explicitly-empty assistant response.
+    # Without this flag, an empty response from runner.run() exits 1 with a
+    # descriptive error so empty results never silently pass as success.
+    ap.add_argument(
+        "--allow-empty",
+        action="store_true",
+        default=False,
+        help=(
+            "treat an explicitly-empty assistant response as success "
+            "(exit 0). Default: exit 1 with an error message."
+        ),
+    )
     ap.add_argument(
         "extra",
         nargs=argparse.REMAINDER,
@@ -124,15 +158,41 @@ def main() -> None:
     # ``--permission-mode`` later (claude's CLI parser takes the last
     # occurrence).
     extra_args = ["--permission-mode", args.permission_mode, *args.extra]
-    print(
-        runner.run(
+
+    # G8 — translate runner.run's return / raise contract into exit codes.
+    # See runner.run docstring for the four-branch contract (AC-7).
+    try:
+        response = runner.run(
             args.prompt,
             extra_args,
             args.verbose,
             args.ready_wait,
             args.timeout,
         )
-    )
+    except RuntimeError as err:
+        # Branches 2-4: no assistant turn / payload missing / transcript
+        # missing. All map to RUNTIME_ERROR with the error message echoed
+        # to stderr so users can see the diagnostic.
+        print(f"claude-i: {err}", file=sys.stderr)
+        sys.exit(RUNTIME_ERROR)
+    except TimeoutError as err:
+        # Pre-existing branch: Stop hook never fired in time.
+        print(f"claude-i: {err}", file=sys.stderr)
+        sys.exit(RUNTIME_ERROR)
+
+    # Branch 1: verified-empty — empty string returned. cli.main translates
+    # to exit 0 only if the caller passed --allow-empty.
+    if response == "":
+        if args.allow_empty:
+            print(response)
+            sys.exit(SUCCESS)
+        print(
+            "claude-i: empty response (use --allow-empty to accept)",
+            file=sys.stderr,
+        )
+        sys.exit(RUNTIME_ERROR)
+
+    print(response)
 
 
 # --- Subcommand placeholders (full implementations in STORY-001.5) ---

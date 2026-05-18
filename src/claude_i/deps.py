@@ -24,6 +24,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from claude_i.exit_codes import CONFIG_ERROR
+
 # External binaries that claude-i shells out to. The full list is the source
 # of truth for ``check_deps``.
 EXPECTED_BINARIES: tuple[str, ...] = ("tmux", "claude")
@@ -108,13 +110,13 @@ def check_deps() -> None:
     """
     if shutil.which("tmux") is None:
         print(f"claude-i: tmux not found on PATH. {_tmux_install_hint()}", file=sys.stderr)
-        sys.exit(2)
+        sys.exit(CONFIG_ERROR)
     if shutil.which("claude") is None:
         print(
             f"claude-i: claude CLI not found on PATH. {_claude_install_hint()}",
             file=sys.stderr,
         )
-        sys.exit(2)
+        sys.exit(CONFIG_ERROR)
 
 
 def assert_not_windows() -> None:

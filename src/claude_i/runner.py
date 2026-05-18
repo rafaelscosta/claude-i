@@ -118,8 +118,26 @@ def run(
     """Drive an interactive ``claude`` session via tmux and return the final
     assistant text.
 
-    Mirrors the seed's behavior 1:1. Hardening (secure tempfile, signal
-    handlers, exit-code differentiation) lands in STORY-001.2.
+    Return / raise contract (STORY-001.2 / Gap G8 — AC-7, four branches):
+
+    1. **Verified-empty assistant turn** — transcript parsed, assistant
+       turn exists, but the ``content`` list yields no ``type=="text"``
+       blocks. ``run()`` returns ``""``. ``cli.main`` translates: exit 0
+       if ``--allow-empty``, otherwise exit ``RUNTIME_ERROR``.
+    2. **No assistant turn found** — transcript parsed but no message with
+       ``role == "assistant"``. ``run()`` raises
+       ``RuntimeError("no assistant message in transcript")``.
+    3. **Payload file never written** — Stop hook fired (sentinel exists)
+       but ``<sentinel>.json`` is missing. ``run()`` raises
+       ``RuntimeError("hook fired but no payload written")``. (Replaces
+       the seed's fake-success ``return "(hook fired but no payload written)"``.)
+    4. **Transcript path missing** — the payload references a transcript
+       file that does not exist on disk. ``run()`` raises
+       ``RuntimeError(f"transcript missing: {transcript}")``. (Replaces
+       the seed's fake-success ``return f"(transcript missing: ...)"``.)
+
+    Pre-existing branches: ``TimeoutError`` on Stop-hook timeout
+    propagates to ``cli.main`` which translates to ``RUNTIME_ERROR``.
     """
     # G5 — ``tempfile.mkstemp`` is atomic (create+open) and avoids the TOCTOU
     # race that ``tempfile.mktemp`` exposes. The fd is closed immediately
@@ -197,13 +215,17 @@ def run(
                 )
             time.sleep(0.3)
 
-        # Parse hook payload → transcript → last assistant text.
+        # G8 — Branch 3: payload file never written. Replaces the seed's
+        # fake-success return that printed an error string as if the run
+        # had succeeded (then exit 0). RuntimeError signals failure to the
+        # caller, which translates to RUNTIME_ERROR.
         if not payload.exists():
-            return "(hook fired but no payload written)"
+            raise RuntimeError("hook fired but no payload written")
         hook_input = json.loads(payload.read_text())
         transcript = Path(hook_input.get("transcript_path", ""))
+        # G8 — Branch 4: transcript path missing.
         if not transcript.exists():
-            return f"(transcript missing: {transcript})"
+            raise RuntimeError(f"transcript missing: {transcript}")
 
         last: dict[str, object] | None = None
         for line in transcript.read_text().splitlines():
@@ -213,9 +235,15 @@ def run(
                 continue
             if msg.get("message", {}).get("role") == "assistant":
                 last = msg["message"]
+        # G8 — Branch 2: no assistant turn was ever recorded. Distinct from
+        # Branch 1 (verified-empty), where the assistant turn exists but
+        # yielded no text blocks. Callers can tell them apart.
         if not last:
-            return ""
+            raise RuntimeError("no assistant message in transcript")
         content = last.get("content", [])
+        # G8 — Branch 1: verified-empty. content is not a list, OR content
+        # has no type=="text" blocks → empty string return. cli.main routes
+        # this through --allow-empty.
         if not isinstance(content, list):
             return ""
         return "".join(

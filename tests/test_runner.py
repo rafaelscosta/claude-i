@@ -18,6 +18,7 @@ second test catches that regression.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -90,7 +91,15 @@ def _drive_run_until_first_subprocess_call(
     monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _session: None)
 
     # ready_wait=0 / timeout=1 keep the call short even if anything else slips.
-    runner.run(prompt="hi", extra_args=[], verbose=False, ready_wait=0.0, timeout=1)
+    # G8: after the four-branch RuntimeError refactor, a stubbed empty
+    # transcript triggers Branch 2 (no assistant message). The G4 contract
+    # tests assert against captured subprocess args, which are populated by
+    # the FIRST subprocess.run call — long before the RuntimeError site.
+    # Swallow the expected RuntimeError so the captured kwargs are returned.
+    try:
+        runner.run(prompt="hi", extra_args=[], verbose=False, ready_wait=0.0, timeout=1)
+    except RuntimeError:
+        pass
     return captured
 
 
@@ -246,3 +255,141 @@ def test_cleanup_registered_after_session_start(
     # Session names follow the claude-i-<pid> format — must match what
     # new-session actually spawned.
     assert register_calls[0].startswith("claude-i-")
+
+
+# STORY-001.2 / Task 3.5 / Gap G8 — four-branch parse-failure contract.
+
+
+def _stub_runner_io(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    payload_text: str = '{"transcript_path": "/tmp/dne"}',
+    transcript_lines: list[str] | None = None,
+    payload_exists: bool = True,
+    transcript_exists: bool = True,
+) -> None:
+    """Common stubs for the four-branch tests.
+
+    Skips real subprocess / tempfile work and lets the test drive ``run()``
+    deterministically to a chosen branch. ``payload_exists`` /
+    ``transcript_exists`` toggle the Branch 3 / Branch 4 paths.
+    """
+    sub_mock, _captured = _make_subprocess_capture()
+    monkeypatch.setattr(runner, "subprocess", MagicMock(run=sub_mock))
+
+    transcript_text = "\n".join(transcript_lines or [])
+
+    # Track which paths exist — sentinel always, payload + transcript per args.
+    # Order of branches in run(): sentinel → payload → transcript.
+    def fake_exists(self: Any) -> bool:
+        s = str(self)
+        if s.endswith(".json"):
+            return payload_exists
+        # Anything that is NOT a sentinel-style claude-i tmpfile is treated
+        # as the transcript path (the test supplies "/tmp/dne", "/tmp/never",
+        # etc. via payload_text).
+        if "claude-i-" not in s:
+            return transcript_exists
+        # The sentinel itself — always exists in tests so the wait loop
+        # exits immediately.
+        return True
+
+    def fake_read_text(self: Any, *args: Any, **kwargs: Any) -> str:
+        s = str(self)
+        if s.endswith(".json"):
+            return payload_text
+        return transcript_text
+
+    monkeypatch.setattr(runner.Path, "exists", fake_exists)
+    monkeypatch.setattr(runner.Path, "read_text", fake_read_text)
+    monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _s: None)
+
+
+def test_payload_missing_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Branch 3 — payload file never written → RuntimeError.
+
+    Replaces the seed's fake-success
+    ``return "(hook fired but no payload written)"`` at runner.py:185-186.
+    """
+    _stub_runner_io(monkeypatch, payload_exists=False)
+    with pytest.raises(RuntimeError, match="hook fired but no payload written"):
+        runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
+
+
+def test_transcript_missing_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Branch 4 — payload references a non-existent transcript → RuntimeError.
+
+    Replaces the seed's fake-success
+    ``return f"(transcript missing: {transcript})"`` at runner.py:189-190.
+    """
+    _stub_runner_io(
+        monkeypatch,
+        payload_text='{"transcript_path": "/tmp/never"}',
+        transcript_exists=False,
+    )
+    with pytest.raises(RuntimeError, match="transcript missing"):
+        runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
+
+
+def test_no_assistant_message_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Branch 2 — transcript has no ``role == "assistant"`` message → RuntimeError.
+
+    Distinct from Branch 1 (assistant turn exists but yields no text).
+    """
+    _stub_runner_io(
+        monkeypatch,
+        transcript_lines=[
+            json.dumps({"message": {"role": "user", "content": "hi"}}),
+        ],
+    )
+    with pytest.raises(RuntimeError, match="no assistant message in transcript"):
+        runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
+
+
+def test_empty_response_returns_empty_string(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Branch 1 — assistant turn exists but content yields no text → return ``""``.
+
+    cli.main translates this to exit 0 (with --allow-empty) or exit 1
+    (without). The runner itself returns the empty string verbatim.
+    """
+    _stub_runner_io(
+        monkeypatch,
+        transcript_lines=[
+            json.dumps(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "x"}],
+                    }
+                }
+            ),
+        ],
+    )
+    result = runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
+    assert result == ""
+
+
+def test_non_empty_response_returns_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Happy path — assistant turn with text blocks returns concatenated text."""
+    _stub_runner_io(
+        monkeypatch,
+        transcript_lines=[
+            json.dumps(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "hello "},
+                            {"type": "text", "text": "world"},
+                        ],
+                    }
+                }
+            ),
+        ],
+    )
+    result = runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
+    assert result == "hello world"

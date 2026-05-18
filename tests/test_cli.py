@@ -123,3 +123,96 @@ def test_version_still_works(capsys: pytest.CaptureFixture[str]) -> None:
     cd.assert_not_called()
     eh.assert_not_called()
     run_mock.assert_not_called()
+
+
+# STORY-001.2 / Task 3.5 + 3.8 / Gap G8 — --allow-empty + ExitCode + epilog.
+
+
+def test_help_lists_all_four_exit_codes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--help`` epilog enumerates codes 0/1/2/3 (G8 extends 001.1's 0/1/2)."""
+    with patch("sys.argv", ["claude-i", "--help"]):
+        with pytest.raises(SystemExit):
+            cli.main()
+    out = capsys.readouterr().out
+    assert "0  success" in out
+    assert "1  runtime error" in out
+    assert "2  missing dependency" in out
+    assert "3  unsupported platform" in out
+
+
+def test_runtime_error_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
+    """A ``RuntimeError`` from ``runner.run`` translates to exit 1 (RUNTIME_ERROR).
+
+    Covers Branches 2-4 of the AC-7 contract — payload missing, transcript
+    missing, no assistant message all surface via RuntimeError and exit 1.
+    """
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(
+            cli.runner, "run", side_effect=RuntimeError("hook fired but no payload written")
+        ),
+        patch("sys.argv", ["claude-i", "hello"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+    assert exc.value.code == 1
+    assert "hook fired but no payload written" in capsys.readouterr().err
+
+
+def test_timeout_error_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
+    """A ``TimeoutError`` from ``runner.run`` also maps to RUNTIME_ERROR."""
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(cli.runner, "run", side_effect=TimeoutError("Stop hook timeout")),
+        patch("sys.argv", ["claude-i", "hello"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+    assert exc.value.code == 1
+    assert "Stop hook timeout" in capsys.readouterr().err
+
+
+def test_no_allow_empty_rejects_empty(capsys: pytest.CaptureFixture[str]) -> None:
+    """Empty response without ``--allow-empty`` exits 1 with the canonical message."""
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(cli.runner, "run", return_value=""),
+        patch("sys.argv", ["claude-i", "hello"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "empty response" in err
+    assert "--allow-empty" in err
+
+
+def test_allow_empty_accepts_empty(capsys: pytest.CaptureFixture[str]) -> None:
+    """Empty response WITH ``--allow-empty`` exits 0 cleanly."""
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(cli.runner, "run", return_value=""),
+        patch("sys.argv", ["claude-i", "--allow-empty", "hello"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+    assert exc.value.code == 0
+
+
+def test_non_empty_response_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
+    """Happy path: non-empty response prints to stdout and exits 0 implicitly."""
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(cli.runner, "run", return_value="hello world"),
+        patch("sys.argv", ["claude-i", "hello"]),
+    ):
+        # main() does not call sys.exit in the happy path; it just prints.
+        cli.main()
+    assert "hello world" in capsys.readouterr().out

@@ -31,6 +31,7 @@ import sys
 import time
 from typing import Any
 
+from claude_i.exit_codes import CONFIG_ERROR, RUNTIME_ERROR
 from claude_i.settings import HOOK_CMD, SETTINGS, load_settings, write_settings
 
 # G7 — fcntl is POSIX-only. On Windows, ``assert_not_windows()`` exits at
@@ -138,7 +139,8 @@ def _acquire_lock_with_retry() -> Any | None:
                     f"(waited {_LOCK_TIMEOUT_SECONDS}s).",
                     file=sys.stderr,
                 )
-                sys.exit(1)
+                # G8 — migrated from bare sys.exit(1) to named constant.
+                sys.exit(RUNTIME_ERROR)
             time.sleep(_LOCK_RETRY_INTERVAL)
 
 
@@ -180,7 +182,15 @@ def install_hook() -> None:
             try:
                 cfg = load_settings()
             except json.JSONDecodeError:
-                sys.exit(f"{SETTINGS} is not valid JSON; refusing to touch it")
+                # G8 — migrated from string-form ``sys.exit(msg)`` (code 1)
+                # to ``print + sys.exit(CONFIG_ERROR)`` (code 2). Malformed
+                # settings is a config error, not a runtime error — the 1→2
+                # semantic change is intentional per story Task 3.8.
+                print(
+                    f"claude-i: {SETTINGS} is not valid JSON; refusing to touch it",
+                    file=sys.stderr,
+                )
+                sys.exit(CONFIG_ERROR)
         hooks_section = cfg.setdefault("hooks", {})
         assert isinstance(hooks_section, dict)
         stop_list = hooks_section.setdefault("Stop", [])
@@ -208,7 +218,11 @@ def ensure_hook() -> None:
     )
     print(f"  command: {HOOK_CMD}", file=sys.stderr)
     if input("Install it now? [y/N] ").strip().lower() != "y":
-        sys.exit("aborted")
+        # G8 — migrated from string-form ``sys.exit("aborted")`` (code 1)
+        # to ``print + sys.exit(RUNTIME_ERROR)`` (still code 1, but via
+        # named constant for consistency).
+        print("claude-i: aborted", file=sys.stderr)
+        sys.exit(RUNTIME_ERROR)
     install_hook()
     print("Installed. Active on the next Claude session.", file=sys.stderr)
     print(
