@@ -197,7 +197,108 @@ Skipped — CodeRabbit CLI requires WSL setup not present in this environment (m
 
 ## QA Results
 
-(empty — populated by @qa)
+### Review Date: 2026-05-17
+
+### Reviewed By: Quinn (Test Architect)
+
+### Gate: **PASS** — Quality Score 94/100
+
+Gate file: `docs/gates/STORY-001.1-gate.md`
+
+### CodeRabbit Self-Healing
+
+- Iterations: 0/3
+- Outcome: SKIPPED — CodeRabbit CLI requires WSL setup not present in this macOS environment. Documented fallback per skill spec. The 30 unit tests + strict mypy + ruff cover the static analysis surface CodeRabbit would have flagged on a Python diff of this size.
+
+### Risk Profile
+
+- Depth: **standard**
+- Escalation triggers fired: none (no auth/payment files; tests added; diff < 500 lines; no prior FAIL gate; 8 ACs is exactly at threshold but not exceeded; no >10-consumer modified files).
+
+### Independent Quality Gates (re-run by @qa in fresh venv)
+
+| Gate | Result |
+|---|---|
+| Fresh `python3 -m venv` + `pip install -e ".[dev]"` | exit 0 (Python 3.14.3) |
+| `pytest tests/` | **30 passed** in 0.10s |
+| `ruff check src/ tests/` | All checks passed |
+| `mypy --strict src/claude_i/` | Success: no issues in 7 source files |
+| `git diff seed/claude-i` | empty (seed untouched) |
+| `claude-i --version` | `claude-i 0.2.0.dev0`, no callbacks fire |
+| `claude-i --help` | exit-code epilog rendered (all 3 lines) |
+
+All gates re-verified — match @dev's claimed results 1:1.
+
+### Acceptance Criteria Coverage
+
+**8/8 ACs verified satisfied.** See gate file `### Acceptance Criteria Coverage` table for the per-AC evidence map.
+
+### Specific Concerns Assessment (from review mission)
+
+| Concern | Verdict |
+|---|---|
+| G2 deferral justification | **ACCEPTED WITH NOTES** — NOTES.md cites 4 authority sources; matcher field genuinely undocumented for `Stop` events; structural `hook_installed()` check is forward-compatible foundation. |
+| G4 design correctness | **VERIFIED** — both env-strip AND sh-prefix assertions present, passing, and load-bearing per @dev's anti-pattern smoke. |
+| G1 default in subprocess args | **VERIFIED** — `cli.py:120` prepends to extras; overridable; tested via 3 cases. |
+| G3 OS hints + exit 2 | **VERIFIED** — Darwin/Ubuntu/Fedora/generic/missing-file all tested; exit code 2 confirmed. |
+| PO conditions (a/b/c/d) | **ALL HONORED** — shell prefix preserved verbatim, Task 2.5 ~15 min, G4 single-purpose commit, both G4 assertions present. |
+| Forward-compat for STORY-001.2 | **CLEAN SEAMS** — `_STRIPPED_ENV_VARS` constant, optional `env` kwarg on `tmux()`, explicit forward-links in docstrings to G5/G6/G8. |
+| Atomic commits | **BISECTABLE** — 4 commits map 1:1 to gaps with clear scope and bodies. |
+
+### Code Quality Assessment
+
+Implementation is exceptionally clean: docstrings explain *why* not just *what*, constants are extracted into named symbols with clear ownership (`HOOK_CMD`, `_STRIPPED_ENV_VARS`, `EXPECTED_BINARIES`, `CLAUDE_INSTALL_URL`), helper functions are small and single-purpose, every error path has a graceful fallback. The G4 two-layer contract (delivery via shell prefix + isolation via env strip) is documented in both module docstring and test docstrings, making the executor-trap @po flagged genuinely hard to fall into.
+
+### Refactoring Performed
+
+None — code did not require @qa-side refactoring.
+
+### Deploy Readiness
+
+Skipped — `deploy_type: none` (Python library/CLI, no production deploy surface).
+
+### Compliance Check
+
+- Python typing (PEP 484 strict): ✅ mypy --strict clean across 7 files
+- Code style (ruff): ✅ clean
+- Test coverage: ✅ 30 tests / 8 ACs (3.75 tests per AC avg) — every AC has at least one directly-verifying test
+- Seed-port discipline (verbatim seed unchanged): ✅ `git diff seed/claude-i` empty
+- Constitution adherence: ✅ commits made locally under `AIOX_ACTIVE_AGENT=dev`; no `git push` from @dev (correctly delegated to @devops)
+- Story conditions from @po: ✅ all 4 honored
+
+### NFR Validation
+
+| NFR | Status |
+|---|---|
+| Security | PASS |
+| Performance | PASS |
+| Reliability | PASS |
+| Maintainability | PASS |
+
+Detail in gate file.
+
+### Top Issues
+
+None blocking. Two minor cosmetic observations (non-gating):
+1. `_is_claude_i_hook_entry` is private but referenced in docstrings — naming consistent, no action.
+2. `claude-i --help` emits ANSI color codes under TTY — argparse default; noted for CI fixture authors.
+
+One forward-compat note: when STORY-001.2 re-touches `runner.py` for G5/G6/G8, reviewer should confirm the G4 two-layer contract is not regressed (a one-line `grep -q 'CLAUDE_I_SENTINEL=' src/claude_i/runner.py` as a CI tripwire would add belt-and-braces).
+
+### Files Modified During Review
+
+None.
+
+### Recommended Status
+
+**✅ Ready for Done** — proceed `@devops *push` → `@po *close-story`.
+
+### Gate Status
+
+Gate: PASS → `docs/gates/STORY-001.1-gate.md`
+Quality Score: 94/100
+Risk profile: standard
+
 
 ## Change Log
 
