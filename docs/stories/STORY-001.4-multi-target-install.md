@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Ready for Review |
+| Status | Done |
 | Epic | EPIC-001 |
 | Owner | TBD |
 | Executor | @devops (Gage) — primary (cross-repo coordination, formula authoring, CI matrix); @dev (Dex) — implementer for `install.sh` if @devops delegates the shell-script body |
@@ -285,3 +285,32 @@ Gate: **PASS** → `docs/gates/STORY-001.4-gate.md`
 | 2026-05-18 | @po (Pax) | Validated 8/10 [GO Condicional]. Context: EPIC-001, 4/6 prior Done. D10: 5 divergences (PyPI URL strategy, cross-repo split, PATH integration silence, Windows-CI ambiguity, checksum strategy), 5 auto-fix adjustments (AC-8/9/10/11, Task 5.8/5.9, Executor=@devops primary, Quality Gate=@qa, Accountable=rafael-costa, deploy_type=none). Conditions: (1) executor MUST coordinate cross-repo commits per Task 5.8; (2) formula authored against local sdist for v0.2.0 dev pass — finalized at epic close per AC-8; (3) `install.sh` invokes `pipx ensurepath` per AC-9; (4) 3-OS matrix excludes Windows native per AC-10 / Epic *Out of Scope*; (5) curl-install checksum risk recorded in docs/guides/homebrew-tap.md per AC-11. |
 | 2026-05-18 | @devops (Gage) | Implementation complete: install.sh bash bootstrap (PEP 668-safe pipx cascade, --dry-run/--check/--local flags); 3-OS smoke matrix building sdist locally + invoking install.sh --local (eliminates PyPI chicken-and-egg per advisor); README full install matrix; docs/guides/homebrew-tap.md (security § + epic-close finalization checklist); Formula/claude-i.rb on rafaelscosta/homebrew-claude-i pointing at GitHub pre-release `v0.2.0-pre` sdist (dev-pass URL). Tasks 5.1-5.8 done. Task 5.7 stretch (auto-update workflow) NOT implemented — manual procedure in homebrew-tap.md instead. Task 5.9 DEFERRED to epic close per AC-8. Local gates green: pytest 68/68, ruff, mypy strict, --version, seed integrity, install.sh --dry-run/--check. Status: Ready for Review. |
 | 2026-05-18 | @qa (Quinn) | Gate: **PASS** (92/100). 10/11 ACs verified end-to-end against local artifacts; AC-1 verified structurally (formula Ruby syntax OK, mixin + depends_on tmux + test do block correct, dev-pass URL `v0.2.0-pre` live with both assets, SHA256 byte-match with `dist/claude_i-0.2.0.tar.gz`). Runtime `brew install` verification enumerated as immediate post-push action. Independent re-run in fresh venv: pytest 68/68, ruff clean, mypy --strict clean (8 files), `--version` = `claude-i 0.2.0`, seed MD5 byte-identical. install.sh functional checks: `--dry-run` exit 0 with expected commands, `--check` exit 2 on clean shell (matches smoke.yml assertion), `--help` self-documenting, unknown flag exit 1 + hint. smoke.yml has 5 jobs (shellcheck + dry-run sanity + 3-OS matrix), all OS jobs build sdist locally and `install.sh --local`. NFRs all PASS. One LOW issue: install.sh:11 docstring says `--check` exits 1, code/smoke expect 2 — cosmetic, non-blocking. Cross-repo coordination clean (Task 5.8 sequence honored). Task 5.9 carryover documented in 3 places. Gate file: `docs/gates/STORY-001.4-gate.md`. Recommended next: @devops `*push` (claude-i first, await smoke green, then tap repo) → manual `brew install` verify on clean macOS → @po `*close-story`. |
+| 2026-05-18 | @po (Pax) | **Closed → Done.** Pre-closure gates: gate file present + verdict PASS (92/100) ✓; all 11 ACs `[x]` ✓; Dev Agent Record fully populated across both repos ✓; status `Ready for Review` → `Done` ✓. CHK-8 N/A (`deploy_type: none`, install.sh is repo artifact, no production deploy surface — CI smoke 3-OS green covers verification). CHK-9 N/A (claude-i has no AIOX registry — sinkra-hub-scoped). CHK-10 N/A (no `services/`/`squads/`/`.claude/skills/` paths touched — install.sh + Homebrew formula are product artifacts, not internal AIOX tooling). Cross-repo state confirmed live on both origins: claude-i 6 commits + gate file (HEAD `87ef0cf`); homebrew-claude-i 2 commits (scaffold `4fc957e` + formula `c7d6a9e`). CI runs all green: ci (#26014198763, 27s) + smoke (#26014008487, 43s, 3 OSes). Task 5.9 (epic-close URL finalization) correctly deferred to STORY-001.5 + `publish.yml` run — NOT a 001.4 blocker per AC-8. Velocity: 5 pts delivery (matches estimate + prior story baseline). Next: **STORY-001.5** — FINAL story closes the Epic (G10/G11/G12/G14/G15/G16/G17 + v0.2.0 tag + `gh workflow run publish.yml` + Task 5.9 Formula URL flip to canonical `files.pythonhosted.org`). |
+
+## Closure
+
+| Field | Value |
+|---|---|
+| **Closed by** | @po (Pax) |
+| **Closed on** | 2026-05-18 |
+| **QA Gate** | PASS 92/100 (`docs/gates/STORY-001.4-gate.md`) |
+| **CI Status** | ci #26014198763 success (27s); smoke #26014008487 success (43s, 3 OSes: macOS-latest / Ubuntu-latest / Fedora:latest container) |
+| **Cross-repo state** | claude-i: HEAD `87ef0cf` live on `origin/main` (6 story commits + gate file). homebrew-claude-i: HEAD `c7d6a9e` live on `origin/main` (scaffold + formula with dev-pass URL pointing at `v0.2.0-pre` GitHub pre-release) |
+| **CHK-8** | N/A — `deploy_type: none`; CI smoke 3-OS green covers install.sh verification end-to-end (build sdist locally → `install.sh --local` → assert `claude-i --version == "claude-i 0.2.0"`) |
+| **CHK-9** | N/A — `claude-i` is an external repo with no AIOX governance surface (registry-governance-check is sinkra-hub-scoped) |
+| **CHK-10** | N/A — no `services/`, `squads/`, or `.claude/skills/` paths touched. install.sh + Homebrew formula are product distribution artifacts, not internal AIOX tooling subject to IDS REUSE > ADAPT > CREATE check |
+
+**Task 5.9 (epic-close URL finalization) carryover:**
+- After `gh workflow run publish.yml` lands `claude-i==0.2.0` on PyPI (STORY-001.5 territory), @devops flips Formula `url` from `https://github.com/rafaelscosta/claude-i/releases/download/v0.2.0-pre/claude_i-0.2.0.tar.gz` (dev-pass) → canonical `https://files.pythonhosted.org/packages/.../claude_i-0.2.0.tar.gz`
+- @devops regenerates `sha256` via `shasum -a 256 <downloaded-sdist>` (will be byte-identical to dev-pass since the sdist is the same artifact uploaded twice — once to GitHub pre-release, once to PyPI)
+- Manual `brew install rafaelscosta/claude-i/claude-i` on a clean macOS verifies AC-1 end-to-end with the canonical URL
+- 7-step procedure already documented in `docs/guides/homebrew-tap.md` § Epic-Close Finalization (no new spec needed)
+
+**Forward-compat carryovers for STORY-001.5 (FINAL story before Epic close):**
+- STORY-001.5 closes G10/G11/G12/G14/G15/G16/G17 (UX & operations: doctor/uninstall/reap/JSON output/streaming/polling/SubagentStop/stale-sentinel cleanup)
+- After STORY-001.5 Done: operator pre-reqs (PyPI Pending Publisher + GitHub `publish` environment) must land BEFORE `gh workflow run publish.yml`
+- Epic close sequence: tag `v0.2.0` on `main` → `gh workflow run publish.yml` → wait for PyPI publish success → Task 5.9 Formula URL flip → manual macOS `brew install` verify → @po closes EPIC-001
+- `seed/claude-i` MUST remain byte-identical through 001.5 (MD5 `c51d55995f8a04244b13ced34285d679`, 180 lines)
+- `--version` MUST continue printing `claude-i 0.2.0` (G4 + AC-9 stability contract across all remaining work)
+
+**Velocity:** 5 pts delivered on schedule (matches 001.0/001.1/001.2/001.3 baseline of same-day delivery per story). Cumulative epic velocity: 23 pts / 5 stories Done over ~2 calendar days (sustained pace).
