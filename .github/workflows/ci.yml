@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-typecheck-test:
+    name: lint + type-check + pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package with dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src/ tests/
+
+      - name: Type-check (mypy --strict)
+        run: mypy src/claude_i/
+
+      - name: Run tests (pytest)
+        run: pytest tests/
+
+      - name: Verify CLI entry point and --version output
+        run: |
+          out="$(claude-i --version)"
+          echo "claude-i --version => $out"
+          test "$out" = "claude-i 0.2.0.dev0"
+
+  check-seed-integrity:
+    name: verify seed/claude-i is byte-identical
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare seed against initial commit
+        run: |
+          # The seed must remain byte-identical to its first commit on main
+          # (AC-8 from STORY-001.0). The first commit on main introduced
+          # ``seed/claude-i`` from the upstream gist; any divergence is a
+          # CI failure.
+          first_seed_sha="$(git log --diff-filter=A --format=%H -- seed/claude-i | tail -1)"
+          if [ -z "$first_seed_sha" ]; then
+            echo "ERROR: no commit found that introduced seed/claude-i"
+            exit 1
+          fi
+          echo "First commit introducing seed/claude-i: $first_seed_sha"
+          git diff --exit-code "$first_seed_sha" HEAD -- seed/claude-i
