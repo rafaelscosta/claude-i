@@ -120,3 +120,39 @@ GitHub pre-release sdist (`v0.2.0-pre`). The canonical PyPI
 7. Optionally `gh release delete v0.2.0-pre --cleanup-tag` to remove the pre-release.
 
 Full procedure documented in `docs/guides/homebrew-tap.md` § Epic-Close Finalization.
+
+
+## STORY-001.5 — G14 SubagentStop Deferred
+
+**Status:** G14 (SubagentStop hook event handling) is **DEFERRED** from
+STORY-001.5 — the field name that would distinguish `SubagentStop` from
+`Stop` is not publicly documented in Anthropic's hook payload schema as
+of 2026-05-18 (`claude-code` CLI 2.1.x).
+
+### What was investigated
+- `claude-code` source on GitHub: no public reference to `SubagentStop`
+  event in user-facing docs (docs.claude.com/claude-code).
+- Hook payload structure in `transcript_path` JSONL events: only
+  `Stop` events appear; subagent boundaries are implicit (via tool_use
+  blocks for Task tool).
+- Empirical test on `claude-code` 2.1.143: a Task subagent invocation
+  fires Stop hook with payload containing `transcript_path` pointing
+  at the parent transcript — no distinct `SubagentStop` event observed.
+
+### What was implemented
+- Nothing for `SubagentStop` per se — there's no signal to gate on.
+- Existing `Stop` handler (from STORY-001.0 seed) continues to work for
+  both top-level and subagent-containing transcripts; the last
+  assistant message in the transcript is the right thing to extract
+  regardless of subagent nesting.
+
+### When to revisit
+1. Anthropic publishes documented `SubagentStop` event with payload
+   schema (search docs for `SubagentStop` keyword).
+2. Empirical test shows distinct `SubagentStop` payload (rerun
+   `claude-i -v "use Task to spawn subagent"` and inspect transcript).
+3. At that point: add `hook.handle_subagent_stop()` + tests, update
+   this section.
+
+Reference: STORY-001.5 Task 6.7 (deferred), AC-8 (G14 tests acknowledge
+deferral via `tests/test_hook.py::test_subagent_stop_deferred` marker).
