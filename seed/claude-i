@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""claude-i: like `claude -p`, but driven through an interactive Claude session.
+
+Architecture:
+  - tmux session hosts an interactive `claude` (kill-session nukes the whole
+    process tree — pty alone can't do this reliably).
+  - A Stop hook (one-time install into ~/.claude/settings.json), gated on
+    $CLAUDE_I_SENTINEL, writes the hook payload and touches a sentinel.
+  - We wait on the sentinel, read the transcript path from the payload,
+    extract the last assistant message, then kill the tmux session.
+
+Run with --verbose to tail the tmux pane while it runs (debug hangs).
+"""
+import argparse, json, os, shlex, subprocess, sys, tempfile, threading, time
+from pathlib import Path
+
+HOOK_CMD = (
+    'if [ -n "$CLAUDE_I_SENTINEL" ]; then '
+    'cat > "$CLAUDE_I_SENTINEL.json"; '
+    'touch "$CLAUDE_I_SENTINEL"; '
+    'fi'
+)
+SETTINGS = Path.home() / ".claude" / "settings.json"
+
+
+def hook_installed() -> bool:
+    if not SETTINGS.exists():
+        return False
+    try:
+        cfg = json.loads(SETTINGS.read_text())
+    except json.JSONDecodeError:
+        return False
+    return any(
+        h.get("command") == HOOK_CMD
+        for g in cfg.get("hooks", {}).get("Stop", [])
+        for h in g.get("hooks", [])
+    )
+
+
+def install_hook() -> None:
+    SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+    cfg = {}
+    if SETTINGS.exists():
+        try:
+            cfg = json.loads(SETTINGS.read_text())
+        except json.JSONDecodeError:
+            sys.exit(f"{SETTINGS} is not valid JSON; refusing to touch it")
+    cfg.setdefault("hooks", {}).setdefault("Stop", []).append(
+        {"hooks": [{"type": "command", "command": HOOK_CMD}]}
+    )
+    SETTINGS.write_text(json.dumps(cfg, indent=2))
+
+
+def ensure_hook() -> None:
+    if hook_installed():
+        return
+    print(f"claude-i needs a Stop hook in {SETTINGS}.", file=sys.stderr)
+    print("Gated on $CLAUDE_I_SENTINEL, so it won't affect normal Claude use.", file=sys.stderr)
+    print(f"  command: {HOOK_CMD}", file=sys.stderr)
+    if input("Install it now? [y/N] ").strip().lower() != "y":
+        sys.exit("aborted")
+    install_hook()
+    print("Installed. Active on the next Claude session.", file=sys.stderr)
+    print("If the first run hangs, run `claude` interactively once, type /hooks,", file=sys.stderr)
+    print("acknowledge the change, then exit and retry.", file=sys.stderr)
+
+
+def tmux(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(["tmux", *args], capture_output=True, text=True, check=check)
+
+
+def tail_pane(session: str, stop_event: threading.Event) -> None:
+    """Stream tmux pane content to stderr until stop_event is set."""
+    last = ""
+    while not stop_event.is_set():
+        try:
+            out = tmux("capture-pane", "-pt", session, check=False).stdout
+        except Exception:
+            break
+        if out != last:
+            sys.stderr.write("\033[2J\033[H")  # clear + reprint pane snapshot
+            sys.stderr.write(out)
+            sys.stderr.flush()
+            last = out
+        time.sleep(0.3)
+
+
+def run(prompt: str, extra_args: list[str], verbose: bool,
+        ready_wait: float, timeout: int) -> str:
+    sentinel = Path(tempfile.mktemp(prefix="claude-i-", suffix=".done"))
+    payload = Path(str(sentinel) + ".json")
+    session = f"claude-i-{os.getpid()}"
+
+    # Build the claude command for `sh -c`. shlex.quote is essential — naive
+    # interpolation breaks on prompts containing spaces or shell metachars.
+    parts = [f"CLAUDE_I_SENTINEL={shlex.quote(str(sentinel))}", "exec", "claude"]
+    parts.extend(shlex.quote(a) for a in extra_args)
+    claude_cmd = " ".join(parts)
+
+    tmux("new-session", "-d", "-s", session, "-x", "220", "-y", "50",
+         "sh", "-c", claude_cmd)
+
+    tail_stop = threading.Event()
+    tail_thread = None
+    if verbose:
+        tail_thread = threading.Thread(target=tail_pane, args=(session, tail_stop), daemon=True)
+        tail_thread.start()
+
+    try:
+        # Let the TUI come up.
+        time.sleep(ready_wait)
+
+        # Paste the prompt (multiline-safe) and submit.
+        tmux("set-buffer", "-b", session, prompt)
+        tmux("paste-buffer", "-t", session, "-b", session)
+        tmux("send-keys", "-t", session, "Enter")
+
+        # Wait for Stop hook.
+        deadline = time.time() + timeout
+        while not sentinel.exists():
+            if time.time() > deadline:
+                raise TimeoutError(
+                    f"No Stop hook signal after {timeout}s. Likely causes:\n"
+                    f"  - Hook not yet active (run `claude` once, /hooks, acknowledge)\n"
+                    f"  - TUI never received the prompt (try --ready-wait 8)\n"
+                    f"  - Re-run with --verbose to watch the tmux pane"
+                )
+            time.sleep(0.3)
+
+        # Parse hook payload → transcript → last assistant text.
+        if not payload.exists():
+            return "(hook fired but no payload written)"
+        hook_input = json.loads(payload.read_text())
+        transcript = Path(hook_input.get("transcript_path", ""))
+        if not transcript.exists():
+            return f"(transcript missing: {transcript})"
+
+        last = None
+        for line in transcript.read_text().splitlines():
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if msg.get("message", {}).get("role") == "assistant":
+                last = msg["message"]
+        if not last:
+            return ""
+        return "".join(
+            b.get("text", "") for b in last.get("content", [])
+            if b.get("type") == "text"
+        )
+    finally:
+        tail_stop.set()
+        if tail_thread:
+            tail_thread.join(timeout=1)
+        # The whole point: kill-session reaps the entire process tree.
+        tmux("kill-session", "-t", session, check=False)
+        for p in (sentinel, payload):
+            try: p.unlink()
+            except FileNotFoundError: pass
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("prompt")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="tail the tmux pane to stderr (debug hangs)")
+    ap.add_argument("--ready-wait", type=float, default=4.0,
+                    help="seconds to let the TUI start before sending prompt")
+    ap.add_argument("--timeout", type=int, default=600,
+                    help="seconds to wait for Stop hook before failing")
+    ap.add_argument("extra", nargs=argparse.REMAINDER,
+                    help="extra args forwarded to claude")
+    args = ap.parse_args()
+    ensure_hook()
+    print(run(args.prompt, args.extra, args.verbose, args.ready_wait, args.timeout))
+
+
+if __name__ == "__main__":
+    main()
