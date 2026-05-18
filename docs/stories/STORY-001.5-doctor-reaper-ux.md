@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Ready for Review |
+| Status | Done |
 | Epic | EPIC-001 |
 | Owner | @dev (Dex) |
 | Executor | @dev |
@@ -10,6 +10,7 @@
 | Accountable | rafaelscosta |
 | deploy_type | none |
 | Created | 2026-05-17 |
+| Closed | 2026-05-18 |
 | Depends on | STORY-001.1, STORY-001.2 |
 | Estimated | 5 pts (~2 days) |
 
@@ -263,6 +264,7 @@ As an operator running `claude-i` in scripts and pipelines, I want self-diagnost
 | 2026-05-18 | @qa (Quinn) | Quality gate **CONCERNS** (80/100). 84/84 pytest PASS, ruff clean, mypy --strict clean (8 sources). All 3 @po NO-GO findings (C-1/C-2/C-3) genuinely resolved. AC-1/2/5/6/7 fully met; AC-3/4 met with minor exit-code drift (1 vs 2 — defensible per G8 hardening); **AC-8 partially unmet** (G15 ✓, G14 ✗ — zero tests, not even a deferral marker). Top gaps: Tasks 6.2/6.3/6.7 promised 4–5 tests in `test_hook.py` / `test_cli.py` / `test_runner.py` for `remove_hook`, `cmd_reap` wiring, and G14 graceful handling — none delivered despite `[x]` checkboxes. Functionality works (verified by hand); gap is test coverage debt + checkbox accuracy. Gate file: `docs/gates/STORY-001.5-gate.md`. Epic-close v0.2.0 tag ceremony is **UNBLOCKED** (no security/data-loss risk). Recommend Path A (@dev adds 4 tests in ~30 min → re-gate to PASS) or Path B (@po accepts CONCERNS, logs test debt in epic-close notes). |
 | 2026-05-18 | @qa (Quinn) | **Re-gate PASS (95/100)**. Path A verified end-to-end. All 5 issues resolved (Q-1 G14 deferral marker test, Q-2 remove_hook tests, Q-3 cmd_reap tests, Q-4 AC-3/AC-4 exit code text aligned with impl, Q-5 checkbox accuracy). Fresh-venv re-run: pytest 89/89, ruff clean, mypy `--strict` clean (8 src files), seed/reaper integrity preserved, G4/G7/G8 contracts intact. All 8 ACs fully met. Gate file updated. Ready for @devops push → @po close → epic-close ceremony. |
 | 2026-05-18 | @dev (Dex) | **Path A executed** (re-gate prep). Q-1/Q-2/Q-3 closed: +5 tests landed (commit `36f6ad9`) — `test_hook.py::test_remove_hook_removes_only_claude_i_entry`, `test_hook.py::test_remove_hook_noop_when_not_installed`, `test_hook.py::test_subagent_stop_deferred` (G14 deferral marker pinning NOTES.md § 'STORY-001.5 — G14 SubagentStop Deferred'), `test_cli.py::test_reap_subcommand_calls_reap_orphans`, `test_cli.py::test_reap_subcommand_zero_count_exits_0`. Pytest 89/89 PASS, ruff clean, mypy --strict clean (8 src files), G4 contract pair intact. Q-4 closed: AC-3/AC-4 exit codes updated to `CONFIG_ERROR (2)` to match impl (G8 hardening convention). Q-5 closed: Task 6.7 test reference updated to point at the deferral marker test in `test_hook.py`. No `src/` changes. Ready for re-gate (expected PASS). |
+| 2026-05-18 | @po (Pax) | **STORY-001.5 closed → Done.** Final status Done. Re-gate PASS 95/100 accepted (was CONCERNS 80/100; Path A resolved all 5 issues — Q-1 G14 deferral marker, Q-2 remove_hook tests, Q-3 cmd_reap tests, Q-4 AC-3/AC-4 exit code text, Q-5 checkbox accuracy). All 8 ACs fully met. origin/main HEAD `b576070`; CI run #26016126041 + smoke #26016126042 + build-check all GREEN. G14 deferred via NOTES.md § 'STORY-001.5 — G14 SubagentStop Deferred' (companion to G2 deferral pattern from 001.1); deferral marker test pins the NOTES.md section. CHK-8/9/10 N/A (`deploy_type: none`; claude-i has no AIOX governance surface). Velocity: 5 pts same-day delivery (matches 001.0/001.1/001.2/001.3/001.4 baseline). **Cumulative: 28 pts / 6 stories / 100% implementation phase complete.** Carryovers (all → epic-close ceremony, NOT new stories): (1) v0.2.0 git tag + push, (2) `gh workflow run publish.yml` (requires operator PyPI Pending Publisher + GitHub `publish` environment pre-reqs), (3) Task 5.9 Formula URL flip to canonical `files.pythonhosted.org` artifact + tap push, (4) operator manual `brew install rafaelscosta/claude-i/claude-i` smoke on clean macOS, (5) `*close-epic EPIC-001` (DoD checklist verification). Next: EPIC-001 close ceremony (5-step sequence per Epic close brief). |
 
 ## QA Results
 
@@ -393,3 +395,41 @@ Quality Score: **95 / 100**
 **[✓ Ready for Done]**
 
 Handoff: @devops `*push` (`36f6ad9`, `e130d8f`) → @po `*close-story STORY-001.5` → @po `*close-epic EPIC-001` ceremony (v0.2.0 tag, PyPI publish, Homebrew Formula flip, brew smoke, Epic DoD).
+
+---
+
+## Closure
+
+| Field | Value |
+|---|---|
+| Closed by | @po (Pax) |
+| Closed on | 2026-05-18 |
+| Final status | Done |
+| Quality gate | **PASS 95/100** (re-gate, was CONCERNS 80/100, resolved via Path A — @dev added 5 follow-up tests in commit `36f6ad9` + doc fixes in `e130d8f`) |
+| Pushed to main | `b576070` (re-gate gate file commit) — origin/main HEAD |
+| CI status | ci #26016126041 GREEN + smoke #26016126042 GREEN + build-check GREEN (all gates green on `b576070`) |
+| ACs met | 8/8 (AC-1 doctor ✓, AC-2 doctor --json ✓, AC-3 uninstall ✓, AC-4 reap orphan-only ✓, AC-5 --output-format json ✓, AC-6 readiness poller ✓, AC-7 stale sentinel cleanup ✓, AC-8 G14 deferral marker + G15 functional ✓) |
+| Gaps closed | G10 deferred-with-architecture-rationale, G11 ✓, G12 ✓ (runtime hook verification via doctor check c), G14 DEFERRED via NOTES.md (companion to G2 deferral from 001.1, marker test pins NOTES.md), G15 ✓, G16 ✓ (doctor/uninstall/reap subcommands), G17 ✓ (readiness polling) |
+| CHK-8 | N/A — `deploy_type: none` (claude-i is a Python CLI; PyPI publish + Homebrew flip are epic-close ceremony, not story scope) |
+| CHK-9 | N/A — claude-i has no AIOX governance surface (no `squads/`, `services/`, `.claude/skills/` paths consumed by registry-governance-check.js) |
+| CHK-10 | N/A — same reason as CHK-9 |
+| Carryovers | All deferred to **EPIC-001 close ceremony** (5-step sequence): (1) v0.2.0 git tag, (2) `gh workflow run publish.yml`, (3) Task 5.9 Formula URL flip to canonical PyPI artifact, (4) manual macOS brew install smoke, (5) `*close-epic EPIC-001` (DoD verification) |
+
+### Acceptance verification summary
+
+| AC | Verification path | Status |
+|---|---|---|
+| AC-1 | `cmd_doctor` (cli.py:408) iterates 5 check functions; 7 tests in test_cli.py cover all-pass + missing-tmux + missing-hook + malformed-settings + stale-sentinel + age-filter | ✓ |
+| AC-2 | `test_doctor_json_output` asserts `{"checks": [...], "overall": "..."}` schema | ✓ |
+| AC-3 | `hook.remove_hook()` uses same `_settings_flock` as `install_hook()`; 2 tests in test_hook.py (`test_remove_hook_removes_only_claude_i_entry`, `test_remove_hook_noop_when_not_installed`); CONFIG_ERROR (=2) on malformed JSON per G8 hardening | ✓ |
+| AC-4 | `cmd_reap` delegates to existing `reap_orphans()` (UNCHANGED from 001.2, C-1 IDS resolution); live owners protected via `_pid_alive()`; 2 tests in test_cli.py | ✓ |
+| AC-5 | `RunMetadata: TypedDict` + `runner.run() -> tuple[str, RunMetadata]`; `duration_ms` always populated; 2 tests in test_cli.py | ✓ |
+| AC-6 | `_wait_for_tui_ready` poller (250ms interval, 10s default cap); `TUI_READY_PATTERN` in settings.py for forward-compat; 4 tests in test_runner.py | ✓ |
+| AC-7 | `_cleanup_stale_sentinels()` called at top of `run()`; >24h filter; silent best-effort error swallowing; 2 tests in test_runner.py | ✓ |
+| AC-8 | G15 functional (2 tests) + G14 deferral marker (`test_subagent_stop_deferred` pins NOTES.md § 'STORY-001.5 — G14 SubagentStop Deferred' header + `SubagentStop` keyword + `DEFERRED` label) | ✓ |
+
+### Epic-close ceremony handoff (separate from story closure)
+
+This story closure **does not run the epic-close ceremony**. The ceremony is a 5-step cross-agent sequence with operator-only gates (PyPI Pending Publisher + GitHub `publish` environment + clean macOS brew install). See EPIC-001 closure brief produced alongside this closure.
+
+**Epic implementation progress: 6/6 (100%).** Epic remains `In Progress` until ceremony completes and `*close-epic EPIC-001` runs against Epic DoD checklist.
