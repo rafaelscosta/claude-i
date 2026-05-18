@@ -27,6 +27,22 @@ HOOK_CMD: str = (
 # Path to Claude Code's user-level settings file.
 SETTINGS: Path = Path.home() / ".claude" / "settings.json"
 
+# STORY-001.5 / Task 6.5 / Gap G17 — TUI readiness probe heuristic.
+#
+# ``runner._wait_for_tui_ready`` polls ``tmux capture-pane`` at fixed intervals
+# and checks the captured pane content against this regex. Matches detect a
+# claude TUI prompt indicator and signal "ready to receive input". The
+# pattern is intentionally permissive — both ``>`` (ASCII greater-than) and
+# the Unicode powerline-style prompt glyph (``U+276F``) are accepted because
+# the upstream TUI rendering is an implementation detail (DEP-3 in the gap
+# inventory) and could change.
+#
+# Stored here (not in ``runner.py``) so future tuning is a single-file edit
+# and so users can monkeypatch this constant in tests without touching the
+# poller logic. The U+276F char is intentional — escape sequence form keeps
+# ruff's ambiguous-glyph linter happy without losing the literal match.
+TUI_READY_PATTERN: str = "[>❯]"  # noqa: RUF001
+
 
 def load_settings() -> dict[str, Any]:
     """Load ``SETTINGS`` and return its parsed contents.

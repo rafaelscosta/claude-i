@@ -475,3 +475,85 @@ def test_unicode_encode_warning_path(
     runner.run(bad_prompt, [], verbose=False, ready_wait=0.0, timeout=1)
     err = capsys.readouterr().err
     assert "cannot be encoded as UTF-8" in err
+
+
+# ---------------------------------------------------------------------------
+# STORY-001.5 / Task 6.5 / Gap G17 — readiness poller
+# ---------------------------------------------------------------------------
+
+
+def test_readiness_poller_returns_on_prompt_detected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_wait_for_tui_ready`` returns as soon as the pane shows the prompt.
+
+    Mocks ``tmux capture-pane`` to first return empty content, then content
+    containing ``>``. Asserts the poller iterates and returns without
+    raising once the prompt indicator appears.
+    """
+    pane_outputs = ["", "\n\n", "claude>\n"]
+    call_count = {"n": 0}
+
+    def fake_tmux(*args: Any, **kwargs: Any) -> Any:
+        idx = min(call_count["n"], len(pane_outputs) - 1)
+        call_count["n"] += 1
+        result = MagicMock()
+        result.stdout = pane_outputs[idx]
+        result.returncode = 0
+        return result
+
+    monkeypatch.setattr(runner, "tmux", fake_tmux)
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    # No raise expected — poller returns cleanly on prompt detection.
+    runner._wait_for_tui_ready("claude-i-123", timeout=5.0, interval=0.01)
+    assert call_count["n"] >= 2, "poller must iterate at least twice before match"
+
+
+def test_readiness_poller_raises_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_wait_for_tui_ready`` raises ``TimeoutError`` when the pane never
+    shows the prompt indicator within the deadline."""
+    def fake_tmux(*args: Any, **kwargs: Any) -> Any:
+        result = MagicMock()
+        result.stdout = ""  # never matches TUI_READY_PATTERN
+        result.returncode = 0
+        return result
+
+    monkeypatch.setattr(runner, "tmux", fake_tmux)
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    with pytest.raises(TimeoutError, match="TUI did not become ready"):
+        runner._wait_for_tui_ready("claude-i-456", timeout=0.05, interval=0.01)
+
+
+def test_readiness_poller_zero_timeout_short_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_wait_for_tui_ready`` with ``timeout <= 0`` returns immediately
+    without calling tmux — preserves backward compat with tests that pass
+    ``ready_wait=0.0`` to short-circuit the poller.
+    """
+    call_count = {"n": 0}
+
+    def fake_tmux(*args: Any, **kwargs: Any) -> Any:
+        call_count["n"] += 1
+        return MagicMock(stdout=">", returncode=0)
+
+    monkeypatch.setattr(runner, "tmux", fake_tmux)
+    runner._wait_for_tui_ready("session", timeout=0.0)
+    assert call_count["n"] == 0, "zero-timeout poller must not call tmux"
+
+
+def test_readiness_poller_accepts_unicode_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ASCII ``>`` and U+276F are both recognized prompt indicators (TUI_READY_PATTERN)."""
+    def fake_tmux(*args: Any, **kwargs: Any) -> Any:
+        result = MagicMock()
+        result.stdout = "❯ "  # noqa: RUF001
+        result.returncode = 0
+        return result
+
+    monkeypatch.setattr(runner, "tmux", fake_tmux)
+    runner._wait_for_tui_ready("claude-i-789", timeout=1.0, interval=0.01)
+    # No exception → poller detected the powerline prompt glyph.

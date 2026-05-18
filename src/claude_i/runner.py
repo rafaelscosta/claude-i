@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -47,6 +48,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from claude_i import reaper
+from claude_i.settings import TUI_READY_PATTERN
 
 
 class RunMetadata(TypedDict):
@@ -138,6 +140,60 @@ def _build_metadata(
         tokens_in=tokens_in,
         tokens_out=tokens_out,
     )
+
+
+#: STORY-001.5 / Task 6.5 / Gap G17 — readiness poller default poll interval.
+#: 250ms balances "responsive" (poller returns shortly after the TUI is ready)
+#: against "noisy" (every poll fires a ``tmux capture-pane`` subprocess).
+_READY_POLL_INTERVAL: float = 0.25
+
+
+def _wait_for_tui_ready(
+    session: str,
+    timeout: float,
+    interval: float = _READY_POLL_INTERVAL,
+) -> None:
+    """Block until the claude TUI in ``session`` shows a prompt indicator.
+
+    STORY-001.5 / Task 6.5 / Gap G17 — replaces the seed's fixed
+    ``time.sleep(ready_wait)``. The poller probes ``tmux capture-pane`` at
+    ``interval`` seconds and returns AS SOON AS the captured pane content
+    matches ``TUI_READY_PATTERN`` (ASCII ``>`` or the U+276F glyph). On
+    ``timeout`` exceeded, raises ``TimeoutError("TUI did not become ready")``
+    which the caller (``runner.run`` → ``cli.main``) translates to
+    ``RUNTIME_ERROR``.
+
+    Why poll: the seed's fixed sleep had two failure modes — too short (TUI
+    not ready yet, prompt vanishes into the void), too long (every run pays
+    the worst-case startup time even on fast machines). Polling fixes both:
+    we wait exactly as long as needed, with a generous cap.
+
+    Implementation notes:
+    - ``check=False`` on the capture-pane call so a transiently-missing
+      session (race during new-session startup) does not crash the poller;
+      next iteration retries.
+    - The regex is compiled once per call. ``TUI_READY_PATTERN`` is exposed
+      via ``settings.py`` so operators can monkeypatch if upstream changes.
+    - ``timeout <= 0`` returns immediately without probing — useful for
+      tests that want to short-circuit the poller. Production callers
+      always pass a positive timeout from ``--ready-wait``.
+    """
+    if timeout <= 0:
+        return
+    pattern = re.compile(TUI_READY_PATTERN)
+    deadline = time.monotonic() + timeout
+    while True:
+        result = tmux("capture-pane", "-pt", session, check=False)
+        if pattern.search(result.stdout):
+            return
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                f"TUI did not become ready within {timeout}s. Likely causes:\n"
+                f"  - claude binary failed to start (run `claude` interactively to test)\n"
+                f"  - --ready-wait too short; try doubling it\n"
+                f"  - Re-run with --verbose to watch the tmux pane"
+            )
+        time.sleep(interval)
 
 
 def _sanitized_env() -> dict[str, str]:
@@ -304,8 +360,12 @@ def run(
         tail_thread.start()
 
     try:
-        # Let the TUI come up.
-        time.sleep(ready_wait)
+        # STORY-001.5 / Task 6.5 / Gap G17 — readiness poll replaces the
+        # seed's fixed ``time.sleep(ready_wait)``. ``ready_wait`` is now the
+        # MAX wait, not a fixed delay; the poller returns as soon as the TUI
+        # prompt indicator is detected. On poller timeout, propagate the
+        # TimeoutError to cli.main → RUNTIME_ERROR.
+        _wait_for_tui_ready(session, ready_wait)
 
         # G13 — best-effort UTF-8 round-trip check on the prompt. If the
         # string cannot be encoded in UTF-8 (extremely rare — would
