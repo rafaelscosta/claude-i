@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | In Review |
+| Status | Done |
 | Epic | EPIC-001 |
 | Owner | TBD |
 | Created | 2026-05-17 |
@@ -183,6 +183,9 @@ All six quality gates green on Python 3.11.12 in fresh `/tmp/claude-i-venv-001` 
 | 2026-05-17 | @sm (River) | Story drafted with 11 tasks, 10 ACs |
 | 2026-05-17 | @po (Pax) | Validated 9/10 [GO Condicional]. Context: Epic 001, Wave 0 (bootstrap, no prior stories). 0 prior stories analyzed (Epic is greenfield). D10: 0 divergences (nothing to diverge from). Auto-fixes applied: (1) AC-2 tightened — explicit format contract + argparse `%(prog)s {ver}` recipe; (2) AC-9 — clarified manual smoke + downstream integration testing path; (3) Task 1.8 — added CRITICAL note that `--version` must short-circuit before `ensure_hook()` to prevent CI hangs; (4) Dev Notes — added forward-compat warnings for `hook.py`/`runner.py`/`reaper.py` stubs that downstream stories will rewrite. Status transitioned Draft → Ready. Conditions for @dev: (a) preserve the manual-only verification of AC-9; (b) keep `ready_wait` parameter shape per spec but treat as transitional; (c) verify `--version` exits before `ensure_hook()` is called (use argparse `action="version"`). |
 | 2026-05-17 | @dev (Dex) | Implemented all 11 tasks. All six local quality gates green (install, --version, pytest 4/4, ruff, mypy strict, seed unchanged). Branch `feat/story-001.0-bootstrap-pyproject`. PO conditions addressed: (a) AC-9 verified manually (no automated assertion added); (b) `ready_wait` kept transitional per spec; (c) `--version` uses `action="version"` so it short-circuits before `parse_args()` returns — `ensure_hook()` is unreachable on a `--version` invocation. Status Ready → In Review. Pending: @devops push, @qa gate. |
+| 2026-05-17 | @qa (Quinn) | Quality gate **PASS 96/100**. All 10 ACs verified (AC-7 deferred to post-push CI). 0 CRITICAL/HIGH/MEDIUM issues; 2 LOW cosmetic items recorded as backlog. CodeRabbit skipped (cross-repo, compensating control: manual gate re-run on fresh venv). Gate file: `docs/gates/STORY-001.0-gate.md`. Status: Ready for Done. |
+| 2026-05-17 | @devops (Gage) | Pushed `feat/story-001.0-bootstrap-pyproject` → fast-forward merge to `main`. CI run #26010042733 GREEN on Python 3.11 + 3.12 + `check-seed-integrity` job. AC-7 externally confirmed. Working tree clean post-merge. |
+| 2026-05-17 | @po (Pax) | Closed: status In Review → **Done**. Pre-closure gates: CHK-8 N/A (`deploy_type: none`; CI green run #26010042733 serves as external validation); CHK-9 N/A (claude-i is greenfield, no AIOX registry surface); CHK-10 N/A (no `services/`, `squads/`, or `.claude/skills/` files created — pure Python package scaffold). All Phase 1 verification items confirmed: PASS gate, 11/11 tasks checked, 10/10 ACs verified, File List + Dev Agent Record + QA Results populated. Epic 001 progress: 1/6 stories Done (16.7%). |
 
 ## QA Results
 
@@ -266,3 +269,36 @@ PO conditions: 4/4 met
 
 [✓ Ready for Done] — pending: @devops `*push` → CI green confirms AC-7 → @po `*close-story`.
 (Story owner decides final status.)
+
+## Closure
+
+| Field | Value |
+|---|---|
+| Closed by | @po (Pax) |
+| Closed on | 2026-05-17 |
+| Final status | **Done** |
+| QA gate | **PASS 96/100** (see `docs/gates/STORY-001.0-gate.md`) |
+| CI confirmation | GREEN — run #26010042733 (Python 3.11 + 3.12 + `check-seed-integrity` job) |
+| Pre-closure gates | CHK-8: N/A (`deploy_type: none`; CI run is the external validation) · CHK-9: N/A (no AIOX registry surface in claude-i) · CHK-10: N/A (no service/squad/skill files created — pure Python package scaffold) |
+| Phase 1 verification | PASS gate ✓ · 11/11 tasks checked ✓ · 10/10 ACs verified ✓ · File List populated ✓ · Dev Agent Record populated ✓ · QA Results populated ✓ · Status was `In Review` ✓ |
+
+### Notable forward-compat carryover (for downstream stories)
+
+The bootstrap intentionally preserves seed behavior verbatim. Each module carries inline anchors marking where downstream stories will land:
+
+| Gap | Anchor location | Closes in |
+|---|---|---|
+| G2 — `matcher` / sentinel-keyed hook scoping | `src/claude_i/hook.py:5-7`, `:38-55` | STORY-001.1 |
+| G5 — `tempfile.mkstemp` (replace `mktemp`) | `src/claude_i/runner.py:5-7`, `:66-68` | STORY-001.2 |
+| G6 — `atexit` + signal cleanup | `src/claude_i/reaper.py:3-5`, `:11-27` | STORY-001.2 |
+| G7 — `fcntl.flock` around settings.json mutations | `src/claude_i/settings.py:7-9`, `:50-57` | STORY-001.2 |
+| G15 — stale sentinel cleanup | `src/claude_i/cli.py:99-114` (subcommand placeholders) | STORY-001.2 / STORY-001.5 |
+| G17 — readiness polling (replaces `--ready-wait`) | `src/claude_i/runner.py:8-10`, `src/claude_i/cli.py` arg shape | STORY-001.5 |
+
+### Velocity probe
+
+STORY-001.0 was the Epic's velocity baseline. Effort 5 pts / ~2 days estimated; delivered same-day from validation through close-out via the @sm → @po → @dev → @qa → @devops → @po cycle. Estimate calibration for downstream stories (28 pts total, 5 stories remaining) stands.
+
+### Next recommended story
+
+**STORY-001.1** — Critical hardening (G1-G4 + partial G12): permission-mode default, hook scoping, dep check, env var hygiene. STORY-001.0 was its only prerequisite — now satisfied. Recommended command: `/validate-story-draft docs/stories/STORY-001.1-critical-hardening.md` once @sm has the draft ready, then `/develop-story` to execute.

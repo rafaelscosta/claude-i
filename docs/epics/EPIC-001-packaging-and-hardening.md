@@ -4,7 +4,8 @@
 |---|---|
 | **ID** | EPIC-001 |
 | **Title** | Packaging and Hardening for `claude-i` |
-| **Status** | Draft |
+| **Status** | In Progress |
+| **Progress** | 1/6 stories Done (16.7%) |
 | **Owner** | @pm (Morgan) |
 | **Created** | 2026-05-17 |
 | **Repository** | rafaelscosta/claude-i (private) |
@@ -93,10 +94,10 @@ The 18 gaps from prior analysis, mapped to the stories that close them:
 
 | ID | Title | Status | Depends On | Gaps Covered | Estimated Effort |
 |---|---|---|---|---|---|
-| STORY-001.0 | Bootstrap: package skeleton, pyproject, CI, pytest, seed refactor | Draft | — | G18 (scaffold) | 5 pts (~2 days) |
-| STORY-001.1 | Critical hardening: permission-mode, hook scoping, dep check, env var hygiene | Draft | STORY-001.0 | G1, G2, G3, G4, G12 (partial) | 5 pts (~2 days) |
-| STORY-001.2 | Important hardening: tempfile, reaper, flock, exit codes, platform guard, encoding | Draft | STORY-001.0, STORY-001.1 | G5, G6, G7, G8, G9, G13 | 5 pts (~2 days) |
-| STORY-001.3 | PyPI packaging: build, publish (OIDC), `pipx` + `uv tool` validation, `--version` | Draft | STORY-001.0, STORY-001.1, STORY-001.2 | — (distribution) | 3 pts (~1 day) |
+| STORY-001.0 | Bootstrap: package skeleton, pyproject, CI, pytest, seed refactor | **Done** | — | G18 (scaffold) | 5 pts (~2 days) |
+| STORY-001.1 | Critical hardening: permission-mode, hook scoping, dep check, env var hygiene | Draft | STORY-001.0 ✓ | G1, G2, G3, G4, G12 (partial) | 5 pts (~2 days) |
+| STORY-001.2 | Important hardening: tempfile, reaper, flock, exit codes, platform guard, encoding | Draft | STORY-001.0 ✓, STORY-001.1 | G5, G6, G7, G8, G9, G13 | 5 pts (~2 days) |
+| STORY-001.3 | PyPI packaging: build, publish (OIDC), `pipx` + `uv tool` validation, `--version` | Draft | STORY-001.0 ✓, STORY-001.1, STORY-001.2 | — (distribution) | 3 pts (~1 day) |
 | STORY-001.4 | Multi-target install: Homebrew tap, `install.sh`, OS matrix smoke tests | Draft | STORY-001.3 | — (distribution) | 5 pts (~2 days) |
 | STORY-001.5 | UX & operations: `doctor`, `uninstall`, `reap`, JSON output, streaming, polling, residual gap tests | Draft | STORY-001.1, STORY-001.2 | G10, G11, G12, G14, G15, G16, G17 | 5 pts (~2 days) |
 
@@ -213,7 +214,46 @@ Confidence on estimate: **MEDIA** — calibrated against typical Python CLI pack
 | Date | Version | Change | Author |
 |---|---|---|---|
 | 2026-05-17 | 0.1 | Initial Epic draft from gap analysis + scope decision (full packaging + hardening) | @pm (Morgan) |
+| 2026-05-17 | 0.2 | STORY-001.0 closed → Done. Epic status Draft → **In Progress**. Progress: 1/6 (16.7%). QA PASS 96/100. CI run #26010042733 GREEN. Velocity baseline established: 5 pts / same-day delivery. Next: STORY-001.1 (G1-G4 + G12 partial) ready for @sm draft refinement → @po validation → @dev execution. | @po (Pax) |
 
 ---
 
-*Epic v0.1 | Status: Draft | Next step: handoff to @sm to draft STORY-001.0*
+## Development Log
+
+### Story 001.0 — Bootstrap: Package Skeleton, pyproject, CI, pytest, Seed Refactor (2026-05-17)
+
+**Built:**
+- `pyproject.toml` — Hatchling build backend, Python 3.11+, `claude-i` entry point, ruff/mypy(strict)/pytest config, `[dev]` extras.
+- `src/claude_i/__init__.py` — Package docstring + `__version__ = "0.2.0.dev0"`.
+- `src/claude_i/settings.py` — Canonical `HOOK_CMD` + `SETTINGS` path; typed `load_settings()` / `write_settings()` helpers.
+- `src/claude_i/hook.py` — Verbatim port of `hook_installed()` / `install_hook()` / `ensure_hook()` (seed lines 26-65); delegates I/O to `settings.py`.
+- `src/claude_i/deps.py` — `check_deps()` + `assert_not_windows()` stubs; `EXPECTED_BINARIES = ("tmux", "claude")`.
+- `src/claude_i/runner.py` — Verbatim port of `tmux()` / `tail_pane()` / `run()` (seed lines 68-160). `tempfile.mktemp` deliberately retained with G5 forward-compat marker.
+- `src/claude_i/reaper.py` — `reap_orphans()` / `register_cleanup()` stubs; full impl deferred to STORY-001.2 (G6).
+- `src/claude_i/cli.py` — argparse entry point with `--version` (`action="version"`, `%(prog)s {ver}` format) short-circuiting BEFORE `ensure_hook()`; `doctor`/`uninstall`/`reap` placeholders raise `NotImplementedError` (G15/G16 → STORY-001.5).
+- `tests/test_import.py` — 4 smoke tests: package imports, all submodules import, `HOOK_CMD` SoT identity, `EXPECTED_BINARIES` enumerated.
+- `.github/workflows/ci.yml` — `lint-typecheck-test` job (Python 3.11/3.12, ubuntu-latest, ruff + mypy + pytest + `--version` assertion) + `check-seed-integrity` job (`git diff` against the first commit that introduced `seed/claude-i`).
+
+**Patterns established:**
+- Module boundary contract: `settings.py` owns all `~/.claude/settings.json` I/O and the canonical `HOOK_CMD`; `hook.py` / `runner.py` / `deps.py` / `reaper.py` delegate to it; `cli.py` is a thin argparse wiring layer.
+- Forward-compat anchors as inline comments: each module carries explicit `G{N}` markers at the exact line downstream stories will edit.
+- `HOOK_CMD` single-source-of-truth enforced by `test_hook_cmd_is_single_source_of_truth` — uses identity check (`is`), not equality, to prevent accidental shadowing.
+- `--version` MUST short-circuit before any interactive code path (`ensure_hook()` is unreachable on `--version`) so CI never hits the `input()` prompt.
+- Defensive type guards (`isinstance(parsed, dict)` in `load_settings`, fallback to `__version__` in `_version_string`) are required by mypy strict and do NOT count as behavior changes — AC-9 preserved.
+- CI seed-integrity check compares against the first commit that introduced `seed/`, not `HEAD~1..HEAD`, catching drift across multiple commits.
+
+**Key decisions:**
+- Hatchling chosen over setuptools (PyPA-recommended for new projects, native `pyproject.toml`).
+- `requires-python = ">=3.11"` to get `tomllib` stdlib + stable `argparse.REMAINDER`.
+- `importlib.metadata.version("claude-i")` is the version source — auto-syncs with `pyproject.toml`.
+- All 6 downstream stories' tech debt (G2/G5/G6/G7/G15/G17) anchored as inline comments rather than enforced via lint rules — keeps STORY-001.0 minimal while making downstream edits surgical.
+
+**Tech debt identified:**
+- `tests/.gitkeep` redundant (LOW, cosmetic) — `tests/__init__.py` already serves as package marker.
+- `runner.tail_pane` broad-except (LOW, AC-9 verbatim seed) — tighten opportunistically in STORY-001.2 when touching `runner.py`.
+
+**Tests:** 4 new (smoke). **Deploy:** N/A (`deploy_type: none` — library/CLI scaffold). **CodeRabbit:** 0 iter (skipped — cross-repo, WSL-bound; compensating control: @qa manual gate re-run on fresh venv).
+
+---
+
+*Epic v0.2 | Status: In Progress (1/6 Done) | Next step: STORY-001.1 — Critical hardening (G1-G4 + G12 partial)*
