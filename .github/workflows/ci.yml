@@ -69,3 +69,34 @@ jobs:
           fi
           echo "First commit introducing seed/claude-i: $first_seed_sha"
           git diff --exit-code "$first_seed_sha" HEAD -- seed/claude-i
+
+  build-check:
+    name: build (sdist + wheel) and twine check
+    runs-on: ubuntu-latest
+    # Run on every push to main so the wheel is always publishable
+    # without requiring a full release cycle. Skipped on PRs to keep
+    # PR turnaround fast — lint/typecheck/test still run on PRs.
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build + twine
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: twine check
+        run: twine check dist/*
+
+      - name: List artifacts
+        run: ls -la dist/
