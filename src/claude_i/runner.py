@@ -1,13 +1,33 @@
 """tmux session lifecycle for claude-i.
 
 Verbatim behavioral port of ``seed/claude-i`` lines 68-160 (``tmux``,
-``tail_pane``, ``run``). No hardening lives here in STORY-001.0 —
-``tempfile.mktemp`` is preserved on purpose so STORY-001.2 can replace it
-in a single, auditable patch (gap G5).
+``tail_pane``, ``run``), with STORY-001.1 G4 env-isolation layered on top.
 
 Forward-compat: the ``ready_wait: float`` parameter is **transitional** —
 STORY-001.5 replaces it with readiness polling (gap G17). Keep the
 signature as specified, but do not build features around it.
+
+G4 — env-isolation contract (two layers, both required):
+
+1. **Delivery to sub-claude:** the ``CLAUDE_I_SENTINEL=<path>`` shell prefix
+   inside ``claude_cmd`` is the ONLY mechanism that gets the sentinel value
+   to the Stop hook's shell guard (``if [ -n "$CLAUDE_I_SENTINEL" ]``). It
+   must be preserved verbatim — removing it breaks the hook → sentinel file
+   never written → ``run()`` times out → entire pipeline broken.
+2. **Isolation from sibling subprocesses:** the ``env`` kwarg passed to
+   ``subprocess.run`` for the tmux-spawning call is sanitized via
+   ``_sanitized_env()`` so ``CLAUDE_I_SENTINEL`` cannot bleed into Python-side
+   sibling processes (claude-i never sets it in its own ``os.environ``, but
+   we strip defensively so the guarantee holds even if a caller does).
+
+These solve different problems and are NOT redundant. The test contract in
+``tests/test_runner.py`` asserts both: ``CLAUDE_I_SENTINEL`` is absent from
+the captured ``env`` kwarg AND the ``sh -c`` argument string still begins
+with ``CLAUDE_I_SENTINEL=``.
+
+STORY-001.2 will replace ``tempfile.mktemp`` (gap G5), wire
+``reaper.register_cleanup`` (gap G6), and differentiate exit codes (gap G8).
+Keep G4 changes scoped to env isolation so 001.2 has clean diffs.
 """
 
 from __future__ import annotations
@@ -22,14 +42,47 @@ import threading
 import time
 from pathlib import Path
 
+#: Env vars that must not leak into sibling subprocesses spawned by claude-i.
+#: Currently only ``CLAUDE_I_SENTINEL`` — kept as a constant so future stories
+#: can extend the strip-list without touching call sites.
+_STRIPPED_ENV_VARS: tuple[str, ...] = ("CLAUDE_I_SENTINEL",)
 
-def tmux(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    """Run ``tmux`` with the given args, capturing stdout/stderr as text."""
+
+def _sanitized_env() -> dict[str, str]:
+    """Return a copy of ``os.environ`` with the G4 strip-list removed.
+
+    Defensive: ``CLAUDE_I_SENTINEL`` is set INSIDE the ``sh -c`` argument
+    string (see ``run()`` below), not in claude-i's own environment. So under
+    normal operation the strip is a no-op. We do it anyway so the guarantee
+    holds even if a future caller (or a test) sets the var on
+    ``os.environ``. The strip-list is the single source of truth.
+    """
+    return {k: v for k, v in os.environ.items() if k not in _STRIPPED_ENV_VARS}
+
+
+def tmux(
+    *args: str,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run ``tmux`` with the given args, capturing stdout/stderr as text.
+
+    ``env`` is passed through to ``subprocess.run`` unchanged. When ``None``
+    (the default), the child inherits ``os.environ`` — appropriate for the
+    read-side tmux calls (capture-pane, set-buffer, paste-buffer, send-keys,
+    kill-session) where leaking env vars is harmless because they spawn
+    short-lived tmux client processes, not the sub-claude.
+
+    The single call site that MUST pass ``env=_sanitized_env()`` is the
+    ``new-session`` call in ``run()`` — that is the only path that spawns
+    a long-lived process tree underneath claude-i. See module docstring.
+    """
     return subprocess.run(
         ["tmux", *args],
         capture_output=True,
         text=True,
         check=check,
+        env=env,
     )
 
 
@@ -77,6 +130,11 @@ def run(
     parts.extend(shlex.quote(a) for a in extra_args)
     claude_cmd = " ".join(parts)
 
+    # G4 — Layer 2: pass a sanitized env to THIS call only. The sentinel
+    # value is still delivered to the sub-claude via the explicit shell
+    # prefix inside ``claude_cmd`` above (Layer 1). Stripping it from ``env``
+    # ensures the var cannot leak into any future Python-side sibling
+    # subprocess that this module spawns.
     tmux(
         "new-session",
         "-d",
@@ -89,6 +147,7 @@ def run(
         "sh",
         "-c",
         claude_cmd,
+        env=_sanitized_env(),
     )
 
     tail_stop = threading.Event()
