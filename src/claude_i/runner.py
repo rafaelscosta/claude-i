@@ -25,9 +25,12 @@ These solve different problems and are NOT redundant. The test contract in
 the captured ``env`` kwarg AND the ``sh -c`` argument string still begins
 with ``CLAUDE_I_SENTINEL=``.
 
-STORY-001.2 will replace ``tempfile.mktemp`` (gap G5), wire
-``reaper.register_cleanup`` (gap G6), and differentiate exit codes (gap G8).
-Keep G4 changes scoped to env isolation so 001.2 has clean diffs.
+STORY-001.2 hardens this module further:
+- G5: ``tempfile.mktemp`` → ``tempfile.mkstemp`` (atomic, secure)
+- G6: ``reaper.register_cleanup`` wired after ``new-session`` succeeds
+- G8: parse-failure branches raise ``RuntimeError`` instead of returning
+  fake-success strings; caller (``cli.main``) translates to exit codes
+- G13: explicit UTF-8 encoding for prompt delivery and subprocess I/O
 """
 
 from __future__ import annotations
@@ -116,10 +119,15 @@ def run(
     Mirrors the seed's behavior 1:1. Hardening (secure tempfile, signal
     handlers, exit-code differentiation) lands in STORY-001.2.
     """
-    # NOTE: ``tempfile.mktemp`` is deprecated and insecure. Preserved
-    # intentionally for STORY-001.0 (verbatim seed behavior); STORY-001.2
-    # replaces it with ``tempfile.mkstemp`` (gap G5).
-    sentinel = Path(tempfile.mktemp(prefix="claude-i-", suffix=".done"))
+    # G5 — ``tempfile.mkstemp`` is atomic (create+open) and avoids the TOCTOU
+    # race that ``tempfile.mktemp`` exposes. The fd is closed immediately
+    # because the hook (not claude-i) writes the ``.json`` payload — we only
+    # need the path. The companion payload path is still derived by string
+    # concatenation; that is safe because the hook also creates it via
+    # ``cat > "$CLAUDE_I_SENTINEL.json"`` after the sentinel exists.
+    fd, sentinel_str = tempfile.mkstemp(prefix="claude-i-", suffix=".done")
+    os.close(fd)
+    sentinel = Path(sentinel_str)
     payload = Path(str(sentinel) + ".json")
     session = f"claude-i-{os.getpid()}"
 

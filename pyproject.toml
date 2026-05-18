@@ -70,6 +70,7 @@ select = [
     "B",   # flake8-bugbear
     "UP",  # pyupgrade
     "RUF", # ruff-specific
+    "S306", # bandit: tempfile.mktemp() insecure (G5 regression guard — story spec'd "S322" which is the upstream bandit code; ruff translates it to S306)
 ]
 ignore = [
     "E501", # line too long (handled by formatter)

@@ -141,3 +141,59 @@ def test_sanitized_env_strips_only_sentinel(monkeypatch: pytest.MonkeyPatch) -> 
     env = runner._sanitized_env()
     assert "CLAUDE_I_SENTINEL" not in env
     assert env.get("PATH_TO_PRESERVE") == "yes"
+
+
+# STORY-001.2 / Task 3.1 / Gap G5 — secure tempfile creation.
+
+
+def test_sentinel_uses_mkstemp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``runner.run`` uses ``tempfile.mkstemp`` and never calls ``tempfile.mktemp``.
+
+    ``mktemp`` returns a path WITHOUT creating the file — a TOCTOU race that
+    allows another process to win the create. ``mkstemp`` is atomic. The G5
+    regression test asserts both: ``mkstemp`` is called, and ``mktemp``
+    is NEVER called.
+    """
+    mkstemp_calls: list[tuple[Any, Any]] = []
+    mktemp_calls: list[tuple[Any, Any]] = []
+
+    real_mkstemp = runner.tempfile.mkstemp
+
+    def fake_mkstemp(*args: Any, **kwargs: Any) -> tuple[int, str]:
+        mkstemp_calls.append((args, kwargs))
+        return real_mkstemp(*args, **kwargs)
+
+    def fake_mktemp(*args: Any, **kwargs: Any) -> str:
+        mktemp_calls.append((args, kwargs))
+        return "/tmp/should-never-be-used"
+
+    monkeypatch.setattr(runner.tempfile, "mkstemp", fake_mkstemp)
+    monkeypatch.setattr(runner.tempfile, "mktemp", fake_mktemp)
+
+    sub_mock, _captured = _make_subprocess_capture()
+    monkeypatch.setattr(runner, "subprocess", MagicMock(run=sub_mock))
+    monkeypatch.setattr(runner.Path, "exists", lambda self: True)
+    monkeypatch.setattr(
+        runner.Path,
+        "read_text",
+        lambda self, *args, **kwargs: '{"transcript_path": "/tmp/dne"}',
+    )
+    monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+
+    try:
+        runner.run(prompt="hi", extra_args=[], verbose=False, ready_wait=0.0, timeout=1)
+    except RuntimeError:
+        # G8 — branches may legitimately raise; G5 assertion is about which
+        # tempfile API gets called, not whether the run completes.
+        pass
+
+    assert len(mkstemp_calls) >= 1, "runner.run must call tempfile.mkstemp"
+    assert mktemp_calls == [], (
+        f"runner.run must NEVER call tempfile.mktemp; got: {mktemp_calls}"
+    )
+    _args, kwargs = mkstemp_calls[0]
+    # mkstemp signature accepts prefix / suffix kwargs; verify the prefix is
+    # passed so on-disk tempfiles are still recognizable as claude-i artifacts.
+    assert kwargs.get("prefix") == "claude-i-"
+    assert kwargs.get("suffix") == ".done"
