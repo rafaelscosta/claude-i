@@ -43,11 +43,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         # AC-8 / Task 2.8 — document exit codes in --help output. The epilog
         # renders verbatim after the standard options block.
+        # G6 (STORY-001.2) adds the SIGKILL caveat for tmux session cleanup.
         epilog=(
             "Exit codes:\n"
             "  0  success\n"
             "  1  runtime error (timeout, parse failure)\n"
-            "  2  missing dependency or config error"
+            "  2  missing dependency or config error\n"
+            "\n"
+            "Notes:\n"
+            "  On normal exit, KeyboardInterrupt, or SIGTERM, the tmux session\n"
+            "  claude-i-<pid> is reaped automatically. SIGKILL cannot be\n"
+            "  intercepted — use `claude-i reap` to clean up after SIGKILL."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

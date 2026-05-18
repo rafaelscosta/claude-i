@@ -84,6 +84,10 @@ def _drive_run_until_first_subprocess_call(
     monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
     # time.sleep should be a no-op so the test runs fast.
     monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    # G6 — silence reaper registration so test runs don't install a real
+    # SIGTERM handler in the process. The G6 test suite verifies wiring
+    # explicitly; here we just need run() to succeed.
+    monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _session: None)
 
     # ready_wait=0 / timeout=1 keep the call short even if anything else slips.
     runner.run(prompt="hi", extra_args=[], verbose=False, ready_wait=0.0, timeout=1)
@@ -180,6 +184,8 @@ def test_sentinel_uses_mkstemp(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
     monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    # G6 — silence reaper registration (see _drive helper).
+    monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _session: None)
 
     try:
         runner.run(prompt="hi", extra_args=[], verbose=False, ready_wait=0.0, timeout=1)
@@ -197,3 +203,46 @@ def test_sentinel_uses_mkstemp(monkeypatch: pytest.MonkeyPatch) -> None:
     # passed so on-disk tempfiles are still recognizable as claude-i artifacts.
     assert kwargs.get("prefix") == "claude-i-"
     assert kwargs.get("suffix") == ".done"
+
+
+# STORY-001.2 / Task 3.3 / Gap G6 — reaper wiring.
+
+
+def test_cleanup_registered_after_session_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``runner.run`` calls ``reaper.register_cleanup(session)`` once.
+
+    The session name is ``claude-i-<pid>`` and must match the literal that the
+    ``new-session`` call uses (otherwise atexit cleanup would target a
+    different session than the one actually spawned).
+    """
+    register_calls: list[str] = []
+
+    def fake_register(session: str) -> None:
+        register_calls.append(session)
+
+    sub_mock, _captured = _make_subprocess_capture()
+    monkeypatch.setattr(runner, "subprocess", MagicMock(run=sub_mock))
+    monkeypatch.setattr(runner.Path, "exists", lambda self: True)
+    monkeypatch.setattr(
+        runner.Path,
+        "read_text",
+        lambda self, *args, **kwargs: '{"transcript_path": "/tmp/dne"}',
+    )
+    monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner.reaper, "register_cleanup", fake_register)
+
+    try:
+        runner.run(prompt="hi", extra_args=[], verbose=False, ready_wait=0.0, timeout=1)
+    except RuntimeError:
+        pass
+
+    assert len(register_calls) == 1, (
+        f"runner.run must call reaper.register_cleanup exactly once; "
+        f"got {len(register_calls)} calls: {register_calls}"
+    )
+    # Session names follow the claude-i-<pid> format — must match what
+    # new-session actually spawned.
+    assert register_calls[0].startswith("claude-i-")

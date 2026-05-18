@@ -45,6 +45,8 @@ import threading
 import time
 from pathlib import Path
 
+from claude_i import reaper
+
 #: Env vars that must not leak into sibling subprocesses spawned by claude-i.
 #: Currently only ``CLAUDE_I_SENTINEL`` — kept as a constant so future stories
 #: can extend the strip-list without touching call sites.
@@ -157,6 +159,12 @@ def run(
         claude_cmd,
         env=_sanitized_env(),
     )
+
+    # G6 — register an atexit + SIGTERM handler to tear down ``session`` even
+    # when the ``finally`` block below is bypassed (abrupt exit, signal).
+    # The ``finally`` cleanup remains in place (belt-and-suspenders).
+    # SIGKILL is best-effort only and cannot be intercepted — see ``--help``.
+    reaper.register_cleanup(session)
 
     tail_stop = threading.Event()
     tail_thread: threading.Thread | None = None
