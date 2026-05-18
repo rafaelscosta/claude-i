@@ -5,7 +5,7 @@
 | **ID** | EPIC-001 |
 | **Title** | Packaging and Hardening for `claude-i` |
 | **Status** | In Progress |
-| **Progress** | 1/6 stories Done (16.7%) |
+| **Progress** | 2/6 stories Done (33.3%) |
 | **Owner** | @pm (Morgan) |
 | **Created** | 2026-05-17 |
 | **Repository** | rafaelscosta/claude-i (private) |
@@ -95,7 +95,7 @@ The 18 gaps from prior analysis, mapped to the stories that close them:
 | ID | Title | Status | Depends On | Gaps Covered | Estimated Effort |
 |---|---|---|---|---|---|
 | STORY-001.0 | Bootstrap: package skeleton, pyproject, CI, pytest, seed refactor | **Done** | — | G18 (scaffold) | 5 pts (~2 days) |
-| STORY-001.1 | Critical hardening: permission-mode, hook scoping, dep check, env var hygiene | Draft | STORY-001.0 ✓ | G1, G2, G3, G4, G12 (partial) | 5 pts (~2 days) |
+| STORY-001.1 | Critical hardening: permission-mode, hook scoping, dep check, env var hygiene | **Done** | STORY-001.0 ✓ | G1, G3, G4, G12 (partial) — G2 deferred with NOTES | 5 pts (~2 days) |
 | STORY-001.2 | Important hardening: tempfile, reaper, flock, exit codes, platform guard, encoding | Draft | STORY-001.0 ✓, STORY-001.1 | G5, G6, G7, G8, G9, G13 | 5 pts (~2 days) |
 | STORY-001.3 | PyPI packaging: build, publish (OIDC), `pipx` + `uv tool` validation, `--version` | Draft | STORY-001.0 ✓, STORY-001.1, STORY-001.2 | — (distribution) | 3 pts (~1 day) |
 | STORY-001.4 | Multi-target install: Homebrew tap, `install.sh`, OS matrix smoke tests | Draft | STORY-001.3 | — (distribution) | 5 pts (~2 days) |
@@ -215,6 +215,7 @@ Confidence on estimate: **MEDIA** — calibrated against typical Python CLI pack
 |---|---|---|---|
 | 2026-05-17 | 0.1 | Initial Epic draft from gap analysis + scope decision (full packaging + hardening) | @pm (Morgan) |
 | 2026-05-17 | 0.2 | STORY-001.0 closed → Done. Epic status Draft → **In Progress**. Progress: 1/6 (16.7%). QA PASS 96/100. CI run #26010042733 GREEN. Velocity baseline established: 5 pts / same-day delivery. Next: STORY-001.1 (G1-G4 + G12 partial) ready for @sm draft refinement → @po validation → @dev execution. | @po (Pax) |
+| 2026-05-17 | 0.3 | **STORY-001.1 closed → Done.** Progress: 1/6 → **2/6 (33.3%)**. QA PASS 94/100. CI run #26011076243 GREEN (3 jobs). G1+G3+G4 implemented; G2 deferred-with-notes (matcher field undocumented for `Stop` events — NOTES.md cites 4 authority sources; AC-5 fallback branch is operative path; structural `hook_installed()` check is forward-compatible). G12 partial landed (structural hook check). 5 commits on `origin/main` (4 atomic per-gap + status + gate file). Velocity: 5 pts same-day delivery (matches 001.0 baseline). Next: **STORY-001.2** (G5/G6/G7/G8/G9/G13 — important hardening) ready for refinement; deps met (001.0 ✓, 001.1 ✓). | @po (Pax) |
 
 ---
 
@@ -256,4 +257,40 @@ Confidence on estimate: **MEDIA** — calibrated against typical Python CLI pack
 
 ---
 
-*Epic v0.2 | Status: In Progress (1/6 Done) | Next step: STORY-001.1 — Critical hardening (G1-G4 + G12 partial)*
+### Story 001.1 — Critical Hardening: Permission Mode, Hook Scoping, Dep Check, Env Var Hygiene (2026-05-17)
+
+**Built:**
+- `src/claude_i/deps.py` — full G3 implementation: `check_deps()` exits 2 with OS-specific install hints; `_tmux_install_hint()`, `_linux_distro_ids()`, `_parse_os_release()` helpers; `CLAUDE_INSTALL_URL` constant.
+- `src/claude_i/cli.py` — `--permission-mode` flag (default `acceptEdits`) prepended to `extra_args` (G1); `deps.check_deps()` invoked before `hook.ensure_hook()`; exit-code epilog added with `RawDescriptionHelpFormatter`.
+- `src/claude_i/runner.py` — `_STRIPPED_ENV_VARS` tuple constant + `_sanitized_env()` helper; `tmux()` gains optional `env: dict[str, str] | None = None` kwarg; new-session call site passes `env=_sanitized_env()` (G4 Layer 2). Shell prefix `CLAUDE_I_SENTINEL=<path>` preserved verbatim (G4 Layer 1). Module docstring rewritten to document the two-layer contract + forward-links to G5/G6/G8.
+- `src/claude_i/hook.py` — `hook_installed()` tightened to structural check via `_is_claude_i_hook_entry()` helper (G12 partial); module docstring records G2 matcher deferral with forward-link.
+- `tests/test_deps.py` (new, 8 tests), `tests/test_cli.py` (new, 6 tests), `tests/test_runner.py` (new, 3 tests), `tests/test_hook.py` (new, 9 tests) — 26 new tests + 4 pre-existing = 30/30 pass.
+- `NOTES.md` (new) — operator-facing log; § "Hook Matcher Support" records Task 2.5 investigation (sources, decision, revisit conditions).
+
+**Patterns established:**
+- **G4 two-layer contract** (delivery via shell prefix + isolation via env strip): documented in both module docstring and test docstrings. Both `test_sentinel_stripped_from_subprocess_env` AND `test_sentinel_still_in_sh_command` are load-bearing — the second was anti-pattern-smoke-tested (mutate runner.py to remove prefix → test fails with expected diagnostic, then restore). Future stories touching `runner.py` MUST preserve both layers.
+- **Strip-list extensibility**: `_STRIPPED_ENV_VARS` as tuple constant gives 001.2 / 001.5 a single anchor to extend without touching call sites.
+- **Optional `env` kwarg on `tmux()` helper**: defaults to `None` (inherits `os.environ`). Read-side calls (capture-pane, set-buffer, paste-buffer, send-keys, kill-session) need zero modification. Only the new-session call passes `env=_sanitized_env()`. Keeps `tmux()` as single entrypoint.
+- **OS-specific install hints**: `platform.system()` for Darwin → brew; `/etc/os-release` `ID`/`ID_LIKE` cascade for Linux (ubuntu/debian → apt; fedora/rhel/centos → dnf; generic fallback). Pattern reusable for any future OS-aware messaging.
+- **Structural hook entry check**: `_is_claude_i_hook_entry()` checks `type == "command"` AND `command == HOOK_CMD`. Catches legacy entries (right command, wrong type). Extension point for any future matcher requirement.
+- **Exit code 2 for POSIX dependency/config errors**: documented in `--help` epilog; `sys.exit(2)` (not `raise SystemExit`).
+- **Investigation-with-documented-deferral pattern**: Task 2.5 hit the 90-min cap budget rule. When external schema can't be verified, the durable record (NOTES.md) + forward-compatible structural foundation (`_is_claude_i_hook_entry`) is the right pattern, not invention.
+
+**Key decisions:**
+1. **G4 — `tmux()` env kwarg vs direct subprocess.run**: chose optional kwarg on the helper (symmetric API surface, single tmux entrypoint, read-side calls untouched).
+2. **G4 — strip-list as tuple constant**: factored from inline comprehension to give 001.2 / 001.5 an extension point.
+3. **G2 — DEFER over try-and-test**: `matcher` undocumented for `Stop` events; 90-min cap honored (~15 min used); NOTES.md is durable record; shell guard provides practical isolation; structural `hook_installed()` is forward-compatible foundation.
+4. **G3 install URL**: `CLAUDE_INSTALL_URL = "https://docs.claude.com/en/docs/claude-code/setup"` as constant so future updates don't touch test assertions.
+5. **G4 anti-pattern smoke**: deliberately mutated runner.py to remove shell prefix, confirmed `test_sentinel_still_in_sh_command` fails with expected diagnostic, restored. Confirms the test is genuinely load-bearing.
+
+**Tech debt identified:**
+- **G2 carryover (matcher field)**: documented in NOTES.md § "Hook Matcher Support". Revisit when Anthropic publishes Stop-event matcher schema. Current shell-guard branch is AC-compliant.
+- **G4 contract tripwire (low priority)**: consider CI `grep -q 'CLAUDE_I_SENTINEL=' src/claude_i/runner.py` as belt-and-braces alongside the test pair. Tests already catch removal via mocked subprocess; grep adds second guard if tests are deleted.
+- **`claude-i --help` ANSI color codes under TTY** (cosmetic): argparse default; CI fixture authors should strip if comparing against uncolored.
+- **CodeRabbit SKIPPED**: CLI requires WSL (not present on macOS dev box). 30 unit tests + strict mypy + ruff cover the static analysis surface CodeRabbit would have flagged. Documented fallback per skill spec.
+
+**Tests:** 30 / 30 pass (4 pre-existing regression intact + 26 new). 3.75 tests per AC avg. **Deploy:** N/A (`deploy_type: none`). **CodeRabbit:** 0 iter (skipped — WSL-bound on macOS dev box; compensating gates: ruff + mypy strict + pytest in fresh venv).
+
+---
+
+*Epic v0.3 | Status: In Progress (2/6 Done, 33.3%) | Next step: STORY-001.2 — Important hardening (G5/G6/G7/G8/G9/G13)*

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Ready for Review |
+| Status | Done |
 | Epic | EPIC-001 |
 | Owner | TBD |
 | Created | 2026-05-17 |
@@ -300,10 +300,34 @@ Quality Score: 94/100
 Risk profile: standard
 
 
+## Closure
+
+| Field | Value |
+|---|---|
+| **Closed by** | @po (Pax) |
+| **Closed on** | 2026-05-17 |
+| **QA Gate** | PASS — Quality Score 94/100 (`docs/gates/STORY-001.1-gate.md`) |
+| **CI** | green — run #26011076243 (3 jobs) |
+| **Commits pushed** | `bcb411f`, `b0e9eea`, `8e663e0`, `6fd4497`, `635809f`, `c7d8e48` (6 commits on `origin/main`) |
+| **CHK-8 (deploy verification)** | N/A — `deploy_type: none` (Python library/CLI); CI green is equivalent verification |
+| **CHK-9 (registry governance)** | N/A — cross-repo (claude-i); no AIOX/SINKRA registry surface in this project |
+| **CHK-10 (IDS post-check)** | N/A — pure Python package refactor; no services/squads/skills touched |
+
+### Carryovers
+
+**G2 deferred — documented and forward-compatible.** The `matcher` field is undocumented for `Stop` events. NOTES.md cites 4 authority sources (`claude --help`, local schema paths, live `~/.claude/settings.json`, hooks-architect reference). The structural `hook_installed()` check via `_is_claude_i_hook_entry()` is forward-compatible: any future matcher requirement layers via a small extension to that helper without rewriting the lookup. AC-5's fallback branch (shell-guard-only) is the operative path. Revisit conditions recorded in NOTES.md § "Hook Matcher Support".
+
+**G5 / G6 / G8 forward-compat seams preserved for STORY-001.2.** STORY-001.2 will re-edit `runner.py` for `tempfile.mkstemp` (G5), `reaper.register_cleanup` wiring (G6), and exit-code differentiation (G8). The G4 two-layer contract (shell prefix `CLAUDE_I_SENTINEL=` for delivery + `env=_sanitized_env()` for isolation) MUST be preserved by 001.2's edits. Tripwire suggestion: a `grep -q 'CLAUDE_I_SENTINEL=' src/claude_i/runner.py` regression check in CI would add a second guard beyond the existing test pair. `_STRIPPED_ENV_VARS` tuple constant and `tmux()` optional `env` kwarg are clean extension points for 001.2.
+
+**Cosmetic observations (non-gating, recorded for future polish):**
+- `claude-i --help` emits ANSI color codes under TTY — argparse default; noted for CI fixture authors who capture `--help` output.
+- `_is_claude_i_hook_entry` is module-private — naming consistent, no action.
+
 ## Change Log
 
 | Date | Author | Change |
 |---|---|---|
+| 2026-05-17 | @po (Pax) | Story **closed → Done**. QA gate PASS 94/100, CI run #26011076243 green (3 jobs). CHK-8/9/10 N/A (cross-repo, deploy_type=none, no AIOX registry surface, no services/squads/skills). G2 deferred with NOTES.md documenting 4 authority sources + revisit conditions. G5/G6/G8 forward-compat seams preserved for STORY-001.2. Epic progress: 1/6 → 2/6 (33.3%). Next: STORY-001.2 ready (deps met: 001.0 ✓, 001.1 ✓). |
 | 2026-05-17 | @dev (Dex) | Implementation complete. 4 atomic commits (G3 → G1 → G4 → G2): `bcb411f` deps + OS hints, `b0e9eea` cli (permission-mode + deps gating + exit-code epilog), `8e663e0` runner env-strip, `6fd4497` hook structural check + NOTES.md. 30/30 tests pass, ruff/mypy clean, seed unchanged, `--version` regression intact. Status → Ready for Review. Next: `@qa *review-story`. |
 | 2026-05-17 | @sm (River) | Initial story draft from EPIC-001 (G1-G4 + partial G12) |
 | 2026-05-17 | @po (Pax) | Validated 9/10 [GO with Auto-Fix]. Context: Epic 001, after STORY-001.0 Done (96/100 QA PASS). 1 prior story analyzed. D10: 1 critical contradiction surfaced (Task 2.4 vs Dev Notes G4 — would have broken pipeline if executor followed literally), 4 auto-fixes applied. Conditions: (a) executor MUST keep the `CLAUDE_I_SENTINEL=` shell prefix inside `sh -c claude_cmd` and ONLY strip from the `env` kwarg of sibling `subprocess.run` calls; (b) Task 2.5 hard time-box of 90 min — fall back to shell-guard-only beyond that; (c) coordinate `runner.py` edits with STORY-001.2's pending changes (serialize, small commits); (d) both G4 test assertions (env-strip + sh-prefix) required — a single assertion masks the broken design. Auto-fixes applied: (1) frontmatter completed (Executor `@dev`, Quality Gate `@qa`, Deploy Type `none`, Status `Ready`); (2) AC-4 rewritten to bound scope (sibling subprocesses only, not sub-`claude` descendants) and add explicit two-assertion verification contract; (3) Task 2.4 contradiction resolved — explicit KEEP-prefix + STRIP-from-env-kwarg pattern, anti-pattern callout, both-test-required contract; (4) Task 2.5 time-boxed (90 min) with explicit 3-branch decision matrix and "do not block 2.6/2.7" clause; (5) Dev Notes G4 rewritten as "two layers, both required" with executor-trap warning; (6) Testing section split into both G4 assertions; (7) cross-story coordination note for runner.py double-touch with 001.2 added; (8) code-reality-check anchor against current `runner.py` (lines 76-92) added. |
