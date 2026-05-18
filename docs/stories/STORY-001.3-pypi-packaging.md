@@ -6,8 +6,12 @@
 | Epic | EPIC-001 |
 | Owner | TBD |
 | Created | 2026-05-17 |
-| Depends on | STORY-001.0, STORY-001.1, STORY-001.2 |
+| Validated | 2026-05-18 by @po (Pax) — GO with Auto-Fix, 9/10 |
+| Depends on | STORY-001.0 (Done), STORY-001.1 (Done), STORY-001.2 (Done) |
 | Estimated | 3 pts (~1 day) |
+| Executor | @devops (Gage) — release infrastructure (publish.yml, PyPI Trusted Publisher, GitHub `publish` environment) is `@devops` EXCLUSIVE per `.claude/rules/agent-authority.md` |
+| Quality Gate | @qa (Quinn) |
+| Deploy Type | none — PyPI release artifact, not a production deploy. `deploy-story` is N/A; the tag push IS the release event and runs through `publish.yml` |
 
 ## User Story
 
@@ -21,17 +25,25 @@ As a developer who wants to install `claude-i` without cloning the repo, I want 
 - AC-4: On a clean machine (no source clone), `pipx install claude-i` succeeds and `claude-i --version` prints `claude-i 0.2.0` and exits 0.
 - AC-5: On a clean machine, `uv tool install claude-i` succeeds and `claude-i --version` prints `claude-i 0.2.0` and exits 0.
 - AC-6: The `publish.yml` workflow uses a dedicated GitHub Actions `environment: publish` with required reviewers (or branch protection) to prevent accidental publishes.
-- AC-7: `pyproject.toml` includes all required PyPI metadata: `description`, `readme = "README.md"`, `license`, `authors`, `keywords`, `classifiers` (Python version, OS, license), and `project.urls` (`Homepage`, `Repository`, `Bug Tracker`).
+- AC-7: `pyproject.toml` includes all required PyPI metadata: `description`, `readme = "README.md"`, `license`, `authors`, `keywords`, `classifiers` (Python version, OS, license), and `project.urls` (`Homepage`, `Repository`, `Bug Tracker`). **Pre-state note (verified by @po 2026-05-18):** STORY-001.0 already set `description`, `readme`, `license = { text = "MIT" }`, `authors = [{ name = "rafaelscosta" }]`, `keywords = ["claude", "cli", "tmux", "automation"]`, classifiers including `MIT License`, `Python :: 3 / 3.11 / 3.12`, `Operating System :: MacOS`, `Operating System :: POSIX :: Linux`, and `project.urls` with `Homepage`, `Repository`, `Issues`. This story's delta is: (a) bump `version = "0.2.0.dev0"` → `"0.2.0"` (Task 4.1 last bullet), (b) align `keywords` with spec (`["claude", "ai", "cli", "automation"]` or accept current `["claude", "cli", "tmux", "automation"]` — @devops decides; both PyPI-acceptable), (c) add `Bug Tracker` URL alias if PyPI search relies on the exact label "Bug Tracker" (current uses `Issues`; both render on the PyPI project page — alias is cosmetic).
+
+- AC-8: **Version bump in lockstep + CI assertion update (added by @po validation 2026-05-18).** Three call sites pin `0.2.0.dev0` and MUST move together in a single commit at the release-tag boundary: (a) `pyproject.toml` line 7, (b) `src/claude_i/__init__.py` line 10 (`__version__ = "0.2.0.dev0"`), (c) `.github/workflows/ci.yml` line 48 (`test "$out" = "claude-i 0.2.0.dev0"`). If any of the three is out of sync, the CI `lint-typecheck-test` job from STORY-001.0 (AC-7) fails on the same PR that bumps version. The bump commit MUST land before the `git tag v0.2.0` push. Verification: after the version-bump commit, `claude-i --version` prints `claude-i 0.2.0` (no `.dev0`) on a fresh `pip install -e .` and CI is green.
 
 ## Tasks / Subtasks
 
-- [ ] 4.1 — Complete `pyproject.toml` metadata for PyPI
-  - [ ] Add `description`, `readme = "README.md"`, `license = {text = "MIT"}` (or repo license)
-  - [ ] Add `authors = [{name = "...", email = "..."}]`
-  - [ ] Add `keywords = ["claude", "ai", "cli", "automation"]`
-  - [ ] Add classifiers: `"Programming Language :: Python :: 3"`, `"Programming Language :: Python :: 3.11"`, `"Programming Language :: Python :: 3.12"`, `"Operating System :: POSIX"`, `"License :: OSI Approved :: MIT License"`
-  - [ ] Add `[project.urls]`: `Homepage`, `Repository`, `Bug Tracker`
-  - [ ] Bump `version = "0.2.0"` (remove `.dev0` pre-release marker for the release tag)
+- [ ] 4.1 — Complete `pyproject.toml` metadata for PyPI (most fields already present from STORY-001.0; this task is a delta)
+  - [x] `description`, `readme = "README.md"`, `license = { text = "MIT" }` (already present, verified by @po 2026-05-18)
+  - [x] `authors = [{ name = "rafaelscosta" }]` (already present; email is optional and intentionally omitted by 001.0)
+  - [ ] Reconcile `keywords`: current is `["claude", "cli", "tmux", "automation"]`; spec called for `["claude", "ai", "cli", "automation"]`. @devops decides — both PyPI-acceptable; suggest adopting the union `["claude", "ai", "cli", "tmux", "automation"]` for max discoverability
+  - [x] Classifiers `Python :: 3 / 3.11 / 3.12`, `OS :: MacOS / POSIX :: Linux`, `License :: OSI Approved :: MIT License` (already present, verified by @po 2026-05-18)
+  - [ ] `[project.urls]`: confirm `Homepage`, `Repository` already present; add `Bug Tracker = "<repo>/issues"` alias if PyPI tooling treats `Issues` and `Bug Tracker` as distinct labels (cosmetic — both render on the project page)
+
+- [ ] 4.1b — Version bump in lockstep (AC-8) — single atomic commit
+  - [ ] `pyproject.toml:7` — `version = "0.2.0.dev0"` → `version = "0.2.0"`
+  - [ ] `src/claude_i/__init__.py:10` — `__version__ = "0.2.0.dev0"` → `__version__ = "0.2.0"`
+  - [ ] `.github/workflows/ci.yml:48` — `test "$out" = "claude-i 0.2.0.dev0"` → `test "$out" = "claude-i 0.2.0"`
+  - [ ] Commit ALL THREE in one commit titled `chore(release): bump version 0.2.0.dev0 -> 0.2.0 [STORY-001.3]`. Verify locally: `pip install -e . && claude-i --version` prints `claude-i 0.2.0`.
+  - [ ] Push the bump commit, wait for CI green, **THEN** run `git tag v0.2.0 && git push origin v0.2.0` — the tag triggers `publish.yml`
 
 - [ ] 4.2 — Add `build` and `twine` to dev dependencies
   - [ ] Add to `[project.optional-dependencies] dev`: `"build"`, `"twine"`
@@ -75,7 +87,21 @@ As a developer who wants to install `claude-i` without cloning the repo, I want 
   - [ ] Add a job `build-check` that runs `python -m build && twine check dist/*` on every push to main
   - [ ] This ensures the wheel is always publishable without requiring a full release cycle
 
+- [ ] 4.10 — README install matrix (deferral decision documented by @po 2026-05-18)
+  - [ ] Add a `## Install` section to `README.md` with `pipx install claude-i` and `uv tool install claude-i` rows (PyPI-only — Homebrew row and `install.sh` row land in STORY-001.4)
+  - [ ] If @devops prefers to land the complete install matrix in 001.4 (Homebrew + curl bootstrap + PyPI), call this task "deferred to STORY-001.4" in the PR description and remove the checkbox — Epic DoD owns the full matrix across 001.3/001.4. Either path is acceptable; do not leave it dangling
+
+- [ ] 4.11 — Operator pre-requisite checklist (NOT executable by @devops alone — requires Rafael's PyPI account)
+  - [ ] **Pre-flight check (FIRST ACTION before any code work):** confirm `claude-i` is not already squatted on pypi.org. `curl -fsSL https://pypi.org/pypi/claude-i/json` MUST return 404 (or the existing project belongs to rafaelscosta). If squatted by someone else, HALT and escalate — package name must be resolved before any of the rest of this story is meaningful.
+  - [ ] **Operator action (Rafael, one-time):** create the Pending Publisher on pypi.org with `repository = rafaelscosta/claude-i`, `workflow = publish.yml`, `environment = publish` (per AC-3). @devops cannot do this — requires Rafael's pypi.org credentials.
+  - [ ] **Operator action (Rafael, one-time):** in repo Settings → Environments, create `publish` environment with `rafaelscosta` as required reviewer (per AC-6).
+  - [ ] **Document both steps verbatim in `docs/guides/pypi-trusted-publishing.md` (Task 4.4) so the procedure is reproducible if the project is forked.**
+
 ## Dev Notes
+
+- **Executor rationale (added by @po validation 2026-05-18):** 001.0/001.1/001.2 used `@dev` because they were source-hardening (refactor, hooks, locks). 001.3 is **release infrastructure**: GitHub Actions `publish.yml`, GitHub `publish` environment with required reviewers, PyPI Trusted Publisher OIDC configuration. Per `.claude/rules/agent-authority.md`, CI/CD + release management is `@devops` (Gage) EXCLUSIVE. The pyproject metadata bump + py.typed + build-check CI job are non-release artifacts and could plausibly be `@dev` work, but bundling them under @devops keeps the story atomic (one executor, one PR sequence, one tag-push owner). `@qa` (Quinn) holds the quality gate as in all prior 001.x stories.
+
+- **Cross-story risk to 001.4 (added by @po 2026-05-18):** STORY-001.4 (Multi-target install) depends on `pipx install claude-i` working post-publish. 001.3 MUST NOT (a) rename the package (Homebrew formula + `install.sh` both reference `claude-i` with hyphen), (b) bump major/minor beyond `0.2.0` (Epic DoD targets v0.2.0 specifically), (c) leave the `0.2.0` tag pushed without a successful PyPI publish (a phantom tag with no PyPI artifact blocks 001.4's smoke tests). If `publish.yml` fails after the tag is pushed, @devops must delete the tag (`git push --delete origin v0.2.0`) and the GitHub Release before re-attempting — otherwise the tag-triggered workflow won't re-fire.
 
 - **Trusted Publishing (OIDC):** The `pypa/gh-action-pypi-publish` action supports OIDC natively since v1.8. No `PYPI_TOKEN` secret is needed when Trusted Publishing is configured on pypi.org. This is the recommended PyPA pattern as of 2023+ and avoids long-lived secret management. Reference: https://docs.pypi.org/trusted-publishers/
 - **Version bump strategy:** STORY-001.0 uses `0.2.0.dev0` as the development marker. Before the first release tag is pushed, change `version = "0.2.0"` in `pyproject.toml`. This story owns that bump (it is the packaging story). @dev should coordinate with @devops on the tag push sequence: `pyproject.toml` version bump → commit → `git tag v0.2.0` → push tag → CI publishes.
@@ -104,4 +130,11 @@ As a developer who wants to install `claude-i` without cloning the repo, I want 
 
 ## Dev Agent Record
 
-(empty — populated by @dev)
+(empty — populated by @devops during execution; this story is `@devops`-executed, not `@dev`-executed — see Dev Notes)
+
+## Change Log
+
+| Date | Author | Change |
+|---|---|---|
+| 2026-05-17 | @pm (Morgan) | Initial draft from EPIC-001 scope (Story-3 / PyPI distribution) |
+| 2026-05-18 | @po (Pax) | Validated 9/10 [GO with Auto-Fix]. Context: Epic 001, Wave 3. 3 stories anteriores analisadas (001.0/001.1/001.2 all Done, gates PASS 96/94/95). D10: 4 divergences detected and resolved inline — (1) version-bump CI assertion drift (CI line 48 hardcodes `0.2.0.dev0`, story didn't list updating it → new AC-8 + Task 4.1b ties the 3 call sites together), (2) pyproject metadata pre-state ahead of story (most fields landed in 001.0 → AC-7 re-anchored as delta, Task 4.1 marked partially-Done), (3) executor reassignment `@dev` → `@devops` (release infrastructure per `.claude/rules/agent-authority.md`), (4) README install matrix scope ambiguity → new Task 4.10 with explicit deferral option to 001.4. Added Task 4.11 (operator pre-requisites: PyPI name availability check + Pending Publisher config + GitHub environment) — these gate the tag-push, not the merge. Conditions: 3 operator pre-reqs (name-squat check, Pending Publisher, environment config) MUST land before `git tag v0.2.0`. Executor: @devops (release infra exclusive). Quality Gate: @qa. Deploy Type: none (PyPI release, not production deploy). |
