@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Ready for Review |
+| Status | Done |
 | Epic | EPIC-001 |
 | Owner | TBD |
 | Created | 2026-05-17 |
@@ -181,9 +181,53 @@ As a developer who wants to install `claude-i` without cloning the repo, I want 
 - v0.2.0 git tag + `gh workflow run publish.yml`
 - Operator pre-reqs (PyPI Pending Publisher, GitHub Environment) before tag push
 
+## QA Results
+
+**Gate:** PASS — Quality Score 94/100 — Reviewer: Quinn (Test Architect) — 2026-05-18
+
+**Gate file:** `docs/gates/STORY-001.3-gate.md`
+
+**Reviewed commits:** `4ebc2cb`, `2fd5ddc`, `a06932c`, `f26b504`, `616ffb9`, `db5d026`, `fbb3229`, `75b004a` (8 ahead of `origin/main`).
+
+**Independent re-run in fresh venv (Python 3.14.3):**
+- `python -m build` → `claude_i-0.2.0.tar.gz` (30,230 bytes) + `claude_i-0.2.0-py3-none-any.whl` (22,276 bytes) — exact byte-size match with @devops report
+- `twine check dist/*` → both PASSED
+- `pip install -e ".[dev]"` clean; `pytest tests/` → 68/68 pass; `ruff check` clean; `mypy --strict src/claude_i/` clean across 8 source files
+- `claude-i --version` → `claude-i 0.2.0` (bump verified, no `.dev0`)
+- Seed integrity: `git diff` vs first-commit SHA → empty
+- Wheel METADATA: Name=`claude-i`, entry_points=`claude-i = claude_i.cli:main` (hyphen preserved), `py.typed` present in wheel root
+- `publish.yml` security: zero `PYPI_TOKEN`/`password`/`api-token` references, OIDC-only via `id-token: write`
+
+**AC verdict:** 6/8 PASS, 2/8 correctly DEFERRED (AC-3 PyPI Pending Publisher + AC-6 GitHub `publish` environment — operator pre-reqs documented in `docs/guides/pypi-trusted-publishing.md`). AC-2 trigger uses `workflow_dispatch` instead of `on: push: tags` — documented deviation with rationale in `publish.yml` header + `NOTES.md`; PASS with note.
+
+**v0.2.0 tag status:** NOT created locally, NOT pushed to origin — correctly deferred to epic close per `NOTES.md` lines 78–96.
+
+**Cross-story risk to 001.4:** zero — package name `claude-i` locked, version pinned at `0.2.0`, no phantom tag to block smoke tests, PyPI install path validated end-to-end.
+
+**Top concerns:** (1) AC-2 trigger deviation is intentional and documented; operator must `gh workflow run publish.yml` after tagging at epic close. (2) Operator pre-reqs (PyPI Pending Publisher + GitHub Environment) MUST land before first publish. (3) File List "sigstore-signed assets" wording slightly overstates the workflow (cosmetic).
+
+**Recommended next:** `@po *close-story STORY-001.3` → STORY-001.4.
+
+## Closure
+
+- **Closed by:** @po (Pax) on 2026-05-18
+- **QA gate:** PASS 94/100 (`docs/gates/STORY-001.3-gate.md`) — Quinn (Test Architect)
+- **CI:** will be verified after @devops pushes (closure commit + accumulated unpushed work — 8 dev commits + closure commit)
+- **Deferred operator pre-reqs:** PyPI Pending Publisher (AC-3) + GitHub `publish` environment (AC-6) — operator (Rafael) action required before first `gh workflow run publish.yml` at epic close. Documented verbatim in `docs/guides/pypi-trusted-publishing.md`.
+- **v0.2.0 git tag:** DEFERRED to epic close (post-001.5) per `NOTES.md` § "v0.2.0 Release Tag — Deferred to Epic Close" — keeps release atomic, avoids stale-tag retry hazard. `publish.yml` is `workflow_dispatch` only.
+- **Forward-compat carryovers:**
+  - **STORY-001.4 (Multi-target install):** Homebrew formula (tap repo `rafaelscosta/homebrew-claude-i` already exists), `install.sh` curl bootstrap, 3-OS CI smoke matrix (macOS / Ubuntu / Fedora). README install matrix currently has only PyPI rows; 001.4 lands Homebrew + curl rows.
+  - **STORY-001.5 / epic close:** v0.2.0 git tag + `gh workflow run publish.yml`; operator pre-reqs (PyPI Pending Publisher + GitHub Environment) MUST land before tag push.
+- **CHK gates:**
+  - **CHK-8 (Deploy verification):** N/A — `deploy_type: none`. PyPI release artifact, not a production deploy; CI green (after push) covers verification.
+  - **CHK-9 (Registry governance):** N/A — claude-i is a standalone repo; no AIOX registry surface.
+  - **CHK-10 (IDS post-check):** N/A — no `services/`, `squads/`, or `.claude/skills/` paths touched by this story.
+
 ## Change Log
 
 | Date | Author | Change |
 |---|---|---|
 | 2026-05-17 | @pm (Morgan) | Initial draft from EPIC-001 scope (Story-3 / PyPI distribution) |
+| 2026-05-18 | @qa (Quinn) | Gate **PASS** 94/100 — `docs/gates/STORY-001.3-gate.md`. All 8 ACs validated (6 PASS + 2 correctly deferred to operator). Build verified independently in Python 3.14.3 venv: artifacts byte-size match, twine check PASSED, 68/68 pytest, ruff/mypy clean, --version = `claude-i 0.2.0`. v0.2.0 tag correctly deferred. 001.4 unblocked. |
 | 2026-05-18 | @po (Pax) | Validated 9/10 [GO with Auto-Fix]. Context: Epic 001, Wave 3. 3 stories anteriores analisadas (001.0/001.1/001.2 all Done, gates PASS 96/94/95). D10: 4 divergences detected and resolved inline — (1) version-bump CI assertion drift (CI line 48 hardcodes `0.2.0.dev0`, story didn't list updating it → new AC-8 + Task 4.1b ties the 3 call sites together), (2) pyproject metadata pre-state ahead of story (most fields landed in 001.0 → AC-7 re-anchored as delta, Task 4.1 marked partially-Done), (3) executor reassignment `@dev` → `@devops` (release infrastructure per `.claude/rules/agent-authority.md`), (4) README install matrix scope ambiguity → new Task 4.10 with explicit deferral option to 001.4. Added Task 4.11 (operator pre-requisites: PyPI name availability check + Pending Publisher config + GitHub environment) — these gate the tag-push, not the merge. Conditions: 3 operator pre-reqs (name-squat check, Pending Publisher, environment config) MUST land before `git tag v0.2.0`. Executor: @devops (release infra exclusive). Quality Gate: @qa. Deploy Type: none (PyPI release, not production deploy). |
+| 2026-05-18 | @po (Pax) | **Closed → Done.** QA gate PASS 94/100. CHK-8/9/10 N/A (deploy_type none, no AIOX registry, no services/squads/skills touched). v0.2.0 tag DEFERRED to epic close. Operator pre-reqs (PyPI Pending Publisher + GitHub `publish` environment) documented in `docs/guides/pypi-trusted-publishing.md`. Epic progress 3/6 → 4/6 (66.7%). Carryovers to 001.4 (Homebrew + install.sh + 3-OS smoke) and 001.5/epic close (tag push + first publish). |

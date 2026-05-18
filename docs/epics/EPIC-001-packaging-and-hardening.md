@@ -5,7 +5,7 @@
 | **ID** | EPIC-001 |
 | **Title** | Packaging and Hardening for `claude-i` |
 | **Status** | In Progress |
-| **Progress** | 3/6 stories Done (50.0%) |
+| **Progress** | 4/6 stories Done (66.7%) |
 | **Owner** | @pm (Morgan) |
 | **Created** | 2026-05-17 |
 | **Repository** | rafaelscosta/claude-i (private) |
@@ -97,7 +97,7 @@ The 18 gaps from prior analysis, mapped to the stories that close them:
 | STORY-001.0 | Bootstrap: package skeleton, pyproject, CI, pytest, seed refactor | **Done** | — | G18 (scaffold) | 5 pts (~2 days) |
 | STORY-001.1 | Critical hardening: permission-mode, hook scoping, dep check, env var hygiene | **Done** | STORY-001.0 ✓ | G1, G3, G4, G12 (partial) — G2 deferred with NOTES | 5 pts (~2 days) |
 | STORY-001.2 | Important hardening: tempfile, reaper, flock, exit codes, platform guard, encoding | **Done** | STORY-001.0 ✓, STORY-001.1 ✓ | G5, G6, G7, G8, G9, G13 | 5 pts (~2 days) |
-| STORY-001.3 | PyPI packaging: build, publish (OIDC), `pipx` + `uv tool` validation, `--version` | Draft | STORY-001.0 ✓, STORY-001.1, STORY-001.2 | — (distribution) | 3 pts (~1 day) |
+| STORY-001.3 | PyPI packaging: build, publish (OIDC), `pipx` + `uv tool` validation, `--version` | **Done** | STORY-001.0 ✓, STORY-001.1 ✓, STORY-001.2 ✓ | — (distribution) | 3 pts (~1 day) |
 | STORY-001.4 | Multi-target install: Homebrew tap, `install.sh`, OS matrix smoke tests | Draft | STORY-001.3 | — (distribution) | 5 pts (~2 days) |
 | STORY-001.5 | UX & operations: `doctor`, `uninstall`, `reap`, JSON output, streaming, polling, residual gap tests | Draft | STORY-001.1, STORY-001.2 | G10, G11, G12, G14, G15, G16, G17 | 5 pts (~2 days) |
 
@@ -217,6 +217,7 @@ Confidence on estimate: **MEDIA** — calibrated against typical Python CLI pack
 | 2026-05-17 | 0.2 | STORY-001.0 closed → Done. Epic status Draft → **In Progress**. Progress: 1/6 (16.7%). QA PASS 96/100. CI run #26010042733 GREEN. Velocity baseline established: 5 pts / same-day delivery. Next: STORY-001.1 (G1-G4 + G12 partial) ready for @sm draft refinement → @po validation → @dev execution. | @po (Pax) |
 | 2026-05-17 | 0.3 | **STORY-001.1 closed → Done.** Progress: 1/6 → **2/6 (33.3%)**. QA PASS 94/100. CI run #26011076243 GREEN (3 jobs). G1+G3+G4 implemented; G2 deferred-with-notes (matcher field undocumented for `Stop` events — NOTES.md cites 4 authority sources; AC-5 fallback branch is operative path; structural `hook_installed()` check is forward-compatible). G12 partial landed (structural hook check). 5 commits on `origin/main` (4 atomic per-gap + status + gate file). Velocity: 5 pts same-day delivery (matches 001.0 baseline). Next: **STORY-001.2** (G5/G6/G7/G8/G9/G13 — important hardening) ready for refinement; deps met (001.0 ✓, 001.1 ✓). | @po (Pax) |
 | 2026-05-18 | 0.4 | **STORY-001.2 closed → Done.** Progress: 2/6 → **3/6 (50.0%)**. QA PASS 95/100. CI run #26012342162 GREEN (3 jobs). G5+G6+G7+G8+G9+G13 all implemented. 8 atomic commits on `origin/main` (6 per-gap + 1 test consolidation + 1 docs/gate). HEAD `26bb711`. G4 contract from 001.1 preserved verbatim across all `runner.py` edits (test pair `test_sentinel_stripped_from_subprocess_env` + `test_sentinel_still_in_sh_command` passes). `assert_not_windows()` stub REPLACED (single definition in `deps.py:128`). All 4 AC-7 parse-failure branches landed (3 RuntimeError + 1 explicit empty-string return). New `exit_codes` module is source of truth for 001.5. 68/68 pytest in fresh Python 3.14.3 venv, ruff clean (S306 active), mypy strict clean. CHK-8/9/10 N/A (`deploy_type: none`, no AIOX governance surface in claude-i). Velocity: 5 pts same-day delivery (matches 001.0/001.1 baseline). Forward-compat carryovers to 001.5: G14 (SubagentStop discovery) + G17 (readiness polling) + `exit_codes` reuse. Next: **STORY-001.3** (PyPI packaging — build, OIDC publish, `pipx`/`uv tool` validation, `--version`); deps met (001.0 ✓, 001.1 ✓, 001.2 ✓). | @po (Pax) |
+| 2026-05-18 | 0.5 | **STORY-001.3 closed → Done.** Progress: 3/6 → **4/6 (66.7%)**. QA PASS 94/100. AC tally 6 PASS + 2 correctly DEFERRED (AC-3 PyPI Pending Publisher + AC-6 GitHub `publish` environment — operator pre-reqs, not @devops territory). 8 atomic commits on local `main` (pre-closure HEAD `75b004a`, 8 ahead of `origin/main`): pyproject metadata + build/twine deps (`2fd5ddc`), py.typed PEP 561 (`a06932c`), build-check CI (`f26b504`), publish.yml + Trusted Publishing setup guide (`616ffb9`), README install matrix stub (`db5d026`), atomic 3-file version bump 0.2.0.dev0 → 0.2.0 (`fbb3229`), @po validation note (`4ebc2cb`), story implementation-complete (`75b004a`). Wheel + sdist byte-size match reproduced by @qa in fresh Python 3.14.3 venv (22,276 + 30,230 bytes); `twine check` PASSED; 68/68 pytest; ruff/mypy strict clean; `claude-i --version` prints `claude-i 0.2.0` (no `.dev0`). `publish.yml` zero secret references — OIDC-only (`id-token: write`). **v0.2.0 git tag DEFERRED to epic close** per `NOTES.md` § "v0.2.0 Release Tag — Deferred to Epic Close" (keeps release atomic, avoids stale-tag retry hazard; `publish.yml` is `workflow_dispatch` only). CHK-8/9/10 N/A (`deploy_type: none`, no AIOX registry, no `services/`/`squads/`/`.claude/skills/` paths touched). Velocity: 3 pts same-day delivery (matches estimate). Carryovers to 001.4: Homebrew formula (tap repo `rafaelscosta/homebrew-claude-i` already exists) + `install.sh` curl bootstrap + 3-OS CI smoke matrix + README install matrix completion. Carryovers to 001.5 / epic close: v0.2.0 git tag + `gh workflow run publish.yml` + operator pre-reqs (PyPI Pending Publisher + GitHub `publish` environment) before first publish. Next: **STORY-001.4** (Multi-target install); deps met (001.3 ✓). | @po (Pax) |
 
 ---
 
@@ -332,4 +333,42 @@ Confidence on estimate: **MEDIA** — calibrated against typical Python CLI pack
 
 ---
 
-*Epic v0.4 | Status: In Progress (3/6 Done, 50.0%) | Next step: STORY-001.3 — PyPI packaging (build, OIDC publish, `pipx`/`uv tool` validation, `--version`)*
+### Story 001.3 — PyPI Packaging: Build, Trusted Publishing, pipx/uv Validation (2026-05-18)
+
+**Built:**
+- `.github/workflows/publish.yml` (NEW) — PyPI Trusted Publishing workflow. `workflow_dispatch` only (tag-trigger deferred to epic close per `NOTES.md`); `environment: publish` declared; `permissions: id-token: write, contents: read`; steps `checkout → pip install build → python -m build → pypa/gh-action-pypi-publish@release/v1`. Zero secret references — OIDC-only path.
+- `src/claude_i/py.typed` (NEW, empty) — PEP 561 type marker. Enables `mypy --strict` on downstream consumers using `claude_i` as a library. Cost: zero bytes.
+- `docs/guides/pypi-trusted-publishing.md` (NEW, 163 lines) — operator runbook: PyPI Pending Publisher setup (Step 1, requires Rafael's pypi.org credentials), GitHub `publish` environment with required reviewer (Step 2, requires repo admin), TestPyPI fallback procedure, dry-run validation steps. Forward-portable for forks.
+- `pyproject.toml` — PyPI metadata finalized: keywords union `["claude", "ai", "cli", "tmux", "automation"]`, classifiers (OSI MIT + Python 3/3.11/3.12 + Topic Utilities/Libraries + macOS/POSIX Linux), urls (Homepage + Repository + Issues + Bug Tracker alias). `[project.optional-dependencies] dev` extended with `build>=1.0` + `twine>=5.0`. Version 0.2.0.dev0 → 0.2.0.
+- `src/claude_i/__init__.py` — `__version__ = "0.2.0"` (lockstep with pyproject + ci.yml).
+- `.github/workflows/ci.yml` — `build-check` job added (sdist + wheel + twine check on push to main). `lint-typecheck-test` `--version` assertion bumped to `claude-i 0.2.0`.
+- `README.md` — `## Install` section stub with PyPI rows (pipx + uv tool). Homebrew + curl rows deferred to 001.4 (documented inline).
+- `NOTES.md` — § "v0.2.0 Release Tag — Deferred to Epic Close" (78–96) rationale: keeps release atomic, avoids stale-tag retry hazard.
+
+**Patterns established:**
+- **Trusted Publishing (OIDC) is the canonical PyPI auth path** — never store `PYPI_TOKEN` in repo secrets. `pypa/gh-action-pypi-publish@release/v1` supports OIDC since v1.8. Pattern is reusable for any future Python package published from this org.
+- **Atomic 3-file version bump in ONE commit (AC-8)** — `pyproject.toml:7` + `src/claude_i/__init__.py:10` + `.github/workflows/ci.yml:48` must move together. CI's `--version` assertion is the tripwire that catches drift on the same PR. Pattern reusable for any future version bump.
+- **`build-check` CI job (sdist + wheel + twine check) on every push to main** — ensures the wheel is always publishable without requiring a full release cycle. Catches metadata regressions immediately.
+- **`workflow_dispatch`-only release workflow as human gate** — operator scoped 001.3 to avoid GitHub Environments ceremony before epic close. Re-enabling tag-trigger is a one-line uncomment in `publish.yml` header. Pattern: human gate via dispatch, escalate to tag-trigger when environment is ready.
+- **Tag deferral to epic close** — a tag-triggered PyPI publish is a one-shot event; the same tag cannot fire it twice. STORY-001.4 and STORY-001.5 land between 001.3 and the tag push. Tag is created and pushed in ONE atomic operation at epic close with clean release notes pointing at the final `main` SHA.
+- **Operator pre-req documentation discipline** — when @devops cannot execute a step (requires Rafael's PyPI account or repo admin), the step lands verbatim in a runbook (`docs/guides/pypi-trusted-publishing.md`) so the procedure is reproducible if the project is forked.
+- **Pre-flight name-squat check (Task 4.11)** — `curl -fsSL https://pypi.org/pypi/<name>/json` MUST return 404 before any packaging work. If squatted, HALT and escalate. Pattern reusable for any future PyPI release.
+
+**Key decisions:**
+1. **AC-2 trigger deviation (`workflow_dispatch` only, not `on: push: tags: [v*.*.*]`)** — operator-scoped human gate; documented in `publish.yml` header + `NOTES.md`. Tag-trigger re-enable is one-line uncomment. @qa accepted as documented deviation (PASS with note).
+2. **v0.2.0 tag deferred to epic close** — chosen over tag-now-and-retry-on-fail because tag-triggered publish is one-shot. If `publish.yml` fails after tag push, @devops would have to delete tag + GitHub Release before re-attempting. Deferral eliminates that hazard.
+3. **`workflow_dispatch` over GitHub Environments (initially)** — operator gates manually via `gh workflow run publish.yml` until first publish lands; environment ceremony deferred to epic close. Simpler initial path.
+4. **Keywords union over spec choice** — spec offered `["claude", "ai", "cli", "automation"]` or current `["claude", "cli", "tmux", "automation"]`; chose union `["claude", "ai", "cli", "tmux", "automation"]` for maximum PyPI discoverability.
+5. **README install matrix scoped to PyPI rows only (Task 4.10)** — Homebrew + curl rows explicitly deferred to STORY-001.4 with inline note. Avoids dangling "TODO" rows; Epic DoD owns the full matrix across 001.3/001.4.
+6. **`py.typed` placed in package root, not via explicit Hatchling include** — Hatchling default include captures all package files; explicit include is redundant. Verified `py.typed` present in wheel root via `unzip -l dist/*.whl | grep py.typed`.
+
+**Tech debt identified:**
+- **File List "sigstore-signed assets" wording (cosmetic)** — `publish.yml` does not include an explicit sigstore step. `pypa/gh-action-pypi-publish@release/v1` v1.10+ publishes attestations by default, but the prose slightly overstates this. Suggested owner: @devops, fix during epic-close pass.
+- **Operator pre-req gating** — PyPI Pending Publisher + GitHub `publish` environment MUST land before first `gh workflow run publish.yml`. Cannot be done by @devops alone. Documented in `docs/guides/pypi-trusted-publishing.md`. Owner: Rafael (operator), action before epic-close tag push.
+- **Tag-trigger re-enable at epic close** — uncomment 4 lines in `publish.yml` header after operator pre-reqs land. Owner: @devops, epic-close pass.
+
+**Tests:** 68 / 68 pass (no new logic tests — release infrastructure is workflow + metadata, validated via `python -m build` + `twine check` + fresh-venv install + CI `build-check` job). Build artifacts reproduced byte-for-byte in fresh Python 3.14.3 venv by @qa. **Deploy:** N/A (`deploy_type: none` — PyPI release artifact, not a production deploy). **CodeRabbit:** 0 iter (skipped — release-infrastructure work; compensating gates: ruff + mypy strict + pytest + `twine check` + manual `pipx`/`uv tool` install validation).
+
+---
+
+*Epic v0.5 | Status: In Progress (4/6 Done, 66.7%) | Next step: STORY-001.4 — Multi-target install (Homebrew tap + `install.sh` curl bootstrap + 3-OS CI smoke matrix)*
