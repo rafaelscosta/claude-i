@@ -10,40 +10,59 @@ Bootstrapping. See `docs/epics/EPIC-001-packaging-and-hardening.md` for full sco
 
 ## Install
 
-| Method                | Command                                                                                          | Platforms        |
-|-----------------------|--------------------------------------------------------------------------------------------------|------------------|
-| Homebrew (recommended for macOS) | `brew install rafaelscosta/claude-i/claude-i`                                                    | macOS            |
-| pipx                  | `pipx install claude-i`                                                                          | macOS, Linux     |
-| uv tool               | `uv tool install claude-i`                                                                       | macOS, Linux     |
-| One-line bootstrap    | `curl -fsSL https://raw.githubusercontent.com/rafaelscosta/claude-i/main/install.sh \| bash`     | macOS, Linux     |
+claude-i is currently a **private repository** — install paths require read access (be added as a collaborator, or have a PAT with `repo` scope).
 
 > Native Windows is not supported in v0.2.0; use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install). The `claude-i` CLI emits `PLATFORM_ERROR=3` on `sys.platform == "win32"` (G9 platform guard, STORY-001.2).
 
-### Homebrew tap
+### Option 1 — pipx + git (recommended)
 
-The tap repository is [`rafaelscosta/homebrew-claude-i`](https://github.com/rafaelscosta/homebrew-claude-i). The formula declares `tmux` as a `depends_on`, so `brew install` ensures both binaries are present after a single command.
+```bash
+pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.0
+```
 
-See [`docs/guides/homebrew-tap.md`](docs/guides/homebrew-tap.md) for tap details, dev-pass URL strategy, and the v0.2.0 epic-close finalization steps.
+Requires `gh auth login` or a `GH_TOKEN`/`GITHUB_TOKEN` env var with read access to the repo.
 
-### One-line bootstrap (`install.sh`)
+### Option 2 — GitHub Release wheel
 
-The bootstrap script at the repo root detects OS and package manager:
+```bash
+gh release download v0.2.0 --pattern '*.whl' -R rafaelscosta/claude-i
+pipx install ./claude_i-0.2.0-py3-none-any.whl
+```
 
-- **macOS** — tries the Homebrew tap first; falls back to `pipx install claude-i` if the tap is unreachable.
-- **Ubuntu/Debian** — installs `tmux` via `apt`, bootstraps `pipx` (PEP 668-safe: distro package preferred, `python3 -m pip install --user pipx` as fallback), then `pipx install claude-i`.
-- **Fedora/RHEL** — installs `tmux` via `dnf`, bootstraps `pipx` the same way, then `pipx install claude-i`.
+### Option 3 — sdist (uv-compatible)
 
-Flags:
+```bash
+gh release download v0.2.0 --pattern '*.tar.gz' -R rafaelscosta/claude-i
+uv tool install ./claude_i-0.2.0.tar.gz
+# or: pipx install ./claude_i-0.2.0.tar.gz
+```
 
-- `--dry-run` — print the commands that would run, but do not execute them.
-- `--check` — exit 0 if `claude-i` is already installed and reachable; exit 2 otherwise.
-- `--local <path>` — install from a local sdist/wheel path instead of PyPI (used by CI smoke and the v0.2.0 dev pass before PyPI publish).
+### Verify
 
-After install, `pipx ensurepath` writes `~/.local/bin` into your shell-rc but does not reload the current shell. The script verifies the install via the explicit `$HOME/.local/bin/claude-i` path so `--version` works without restarting your shell. For fresh shells, run `source ~/.bashrc` (or equivalent) or open a new terminal.
+```bash
+claude-i --version    # → claude-i 0.2.0
+claude-i doctor       # self-diagnostic
+```
 
-### Security note (`curl | bash`)
+### Artifact checksums (v0.2.0)
 
-The bootstrap URL `https://raw.githubusercontent.com/rafaelscosta/claude-i/main/install.sh` has no checksum at the curl layer — that risk is documented and accepted for v0.2.0 in [`docs/guides/homebrew-tap.md` § Security](docs/guides/homebrew-tap.md). The script itself does not verify a checksum of its own bytes. The wheel installed by `pipx install claude-i` is verified by `pip` against the PyPI manifest hash. The Homebrew formula provides `sha256` for the source artifact (AC-7).
+- `claude_i-0.2.0-py3-none-any.whl` — SHA256 `ee6a455efd90b279114eb460030d9c96ac83a0119b39621ae837b3c709268e10`
+- `claude_i-0.2.0.tar.gz` — SHA256 `28738be41964796c031f4b2927839e3282a890f906866385ead2279879ec4353`
+
+## Public Release (deferred)
+
+The following paths land when the repo flips PUBLIC + PyPI Pending Publisher is configured:
+
+- `pipx install claude-i` (PyPI)
+- `uv tool install claude-i` (PyPI)
+- `brew install rafaelscosta/claude-i/claude-i` (Homebrew tap)
+- `curl -fsSL https://raw.githubusercontent.com/rafaelscosta/claude-i/main/install.sh | sh`
+
+See `NOTES.md` § "Private Distribution Phase" for the operator checklist to enable public release.
+
+### Bootstrap script (`install.sh`) — currently for local use
+
+The repo also ships `install.sh` at the root. While the repo is private, it is intended for local dev/testing (`--local <path>` mode using artifacts downloaded from a GitHub Release). Once public, it becomes the canonical one-liner via `curl | bash`. Documentation in [`docs/guides/homebrew-tap.md`](docs/guides/homebrew-tap.md).
 
 ## Origin
 
