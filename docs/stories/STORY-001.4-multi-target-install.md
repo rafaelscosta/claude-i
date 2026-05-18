@@ -185,6 +185,98 @@ As a developer on macOS, Ubuntu, or Fedora who prefers their native package mana
 - Update `docs/guides/homebrew-tap.md` if any URL pattern changes
 - Push final Formula update to homebrew-claude-i
 
+## QA Results
+
+### Review Date: 2026-05-18
+
+### Reviewed By: Quinn (Test Architect)
+
+### CodeRabbit Self-Healing
+- Iterations: 0/3
+- Outcome: SKIPPED (per operator instruction — "Skip CodeRabbit")
+- MEDIUM issues logged as tech debt: 0
+
+### Risk Profile
+- Depth: **deep**
+- Escalation triggers: cross-repo coordination (first install surface to consumers); diff spans claude-i (6 commits, ~700+ lines) + homebrew-claude-i (1 commit); story has 11 ACs (>5 threshold); first install path to public consumers — high blast radius
+
+### Code Quality Assessment
+
+Strong. install.sh is 301 lines of disciplined bash (`set -euo pipefail`, no `pip install pipx` bare anywhere, explicit PEP 668 cascade, OS detection via `uname -s` + `/etc/os-release`, MINGW/MSYS/CYGWIN guard, no shell-rc reload mid-script). Formula uses the canonical `Language::Python::Virtualenv` mixin with `virtualenv_install_with_resources` (correct for a zero-dep Python package) and declares both `depends_on "tmux"` (runtime) and `depends_on "python@3.12"` (build/venv). smoke.yml has 5 jobs (shellcheck + dry-run sanity + 3-OS matrix); all OS jobs build sdist locally and invoke `install.sh --local`, eliminating the PyPI chicken-and-egg per advisor guidance. README install matrix lists all 5 paths (Homebrew/pipx/uv tool/curl one-liner) with copy-pasteable commands. docs/guides/homebrew-tap.md is thorough: tap invocation, dev-pass vs canonical URL strategy, full 7-step epic-close finalization checklist, security note (operator-accepted curl-bash checksum risk for v0.2.0), and a Troubleshooting section.
+
+### Independent Quality Gates (re-run in fresh venv)
+
+| Gate | Result |
+|---|---|
+| `pip install -e ".[dev]"` | clean |
+| `pytest tests/` | **68 passed** in 0.25s |
+| `ruff check src tests` | All checks passed |
+| `mypy --strict src` | Success: no issues in 8 source files |
+| `claude-i --version` | `claude-i 0.2.0` |
+| `seed/claude-i` integrity | MD5 `c51d55995f8a04244b13ced34285d679`, 180 lines, byte-identical |
+| `bash install.sh --dry-run` | exit 0; prints pipx fallback commands as expected |
+| `bash install.sh --check` (clean shell) | exit 2 — matches smoke.yml assertion |
+| `bash install.sh --help` | exit 0; prints embedded usage |
+| `bash install.sh --bogus` | exit 1 + usage hint |
+| `ruby -c Formula/claude-i.rb` | Syntax OK |
+| Formula SHA256 vs `dist/claude_i-0.2.0.tar.gz` | byte-identical match (`28738be4...4353`) |
+| `gh release view v0.2.0-pre` | prerelease=true, both sdist + wheel assets uploaded |
+| `yaml.safe_load(smoke.yml)` | 5 jobs: shellcheck, dry-run, smoke-macos, smoke-ubuntu, smoke-fedora |
+
+### Refactoring Performed
+
+None. Implementation is in shape to ship; refactoring would risk diff churn before push.
+
+### Deploy Readiness
+
+Skipped — `deploy_type: none`. Story explicitly notes install.sh is a repo artifact (no production deploy) and the canonical PyPI publish + Formula URL flip are deferred to epic close.
+
+### Compliance Check
+
+- Coding Standards: ✓ Bash with `set -euo pipefail`, function-per-OS, explicit AC comments. Ruby formula follows standard Homebrew Python pattern. YAML well-commented.
+- Project Structure: ✓ Files in expected locations (root `install.sh`, `.github/workflows/`, `docs/guides/`, separate tap repo for formula).
+- Testing Strategy: ✓ Smoke matrix tests at install-script level (not unit); package-level pytest unchanged and green.
+- All ACs Met: ✓ (10/11 end-to-end; AC-1 structural — runtime verification is post-push immediate action).
+
+### Improvements Checklist
+
+- [ ] (dev, post-push) Fix install.sh:11 docstring — change `--check` exits 1 → exits 2 (cosmetic, smoke matrix and code already correct).
+- [ ] (devops, immediate post-push) Confirm smoke matrix first-green on `main` for all 5 jobs.
+- [ ] (devops or operator, post-push) Run `brew tap rafaelscosta/claude-i && brew install rafaelscosta/claude-i/claude-i && claude-i --version` on a clean macOS to verify AC-1 runtime side end-to-end.
+- [ ] (devops, deferred to epic close per AC-8) Task 5.9 — flip Formula `url` to canonical `files.pythonhosted.org` after `publish.yml` lands `claude-i==0.2.0` on PyPI; regenerate `sha256`.
+
+### Security Review
+
+- `curl ... | bash` checksum risk: explicitly accepted by operator for v0.2.0 with rationale documented in `docs/guides/homebrew-tap.md` § Security (script is small + human-auditable, mitigation via `git clone` + known-SHA path).
+- PyPI wheel hash verification: handled by pip automatically against the PyPI manifest.
+- Brew path: formula `sha256` byte-matches the local sdist; Homebrew rejects mismatched downloads.
+- No secrets in `smoke.yml`; no `ANTHROPIC_API_KEY` references.
+
+### Performance Considerations
+
+Smoke matrix builds the sdist once per job (~30KB tarball). install.sh is single-pass. Per-OS smoke job wall-clock expected to be well under 5 minutes.
+
+### Files Modified During Review
+
+None.
+
+### Gate Status
+
+Gate: **PASS** → `docs/gates/STORY-001.4-gate.md`
+
+### Recommended Status
+
+[✓ Ready for Done — pending immediate post-push actions]
+
+**Sequence (per Task 5.8):**
+1. @devops `*push` claude-i (6 commits to `origin/main`).
+2. Wait for smoke matrix first-green on `main` (all 5 jobs).
+3. @devops `*push` homebrew-claude-i (1 commit).
+4. Operator runs `brew tap rafaelscosta/claude-i && brew install rafaelscosta/claude-i/claude-i` on clean macOS to verify AC-1 end-to-end.
+5. @po `*close-story` STORY-001.4. Task 5.9 (epic-close finalization) is correctly deferred per AC-8 — NOT a 001.4 blocker.
+
+(Story owner decides final status.)
+
 ## Change Log
 
 | Date | Author | Change |
@@ -192,3 +284,4 @@ As a developer on macOS, Ubuntu, or Fedora who prefers their native package mana
 | 2026-05-17 | @sm (River) | Initial draft from EPIC-001 scope anchors (Story-5 → STORY-001.4). |
 | 2026-05-18 | @po (Pax) | Validated 8/10 [GO Condicional]. Context: EPIC-001, 4/6 prior Done. D10: 5 divergences (PyPI URL strategy, cross-repo split, PATH integration silence, Windows-CI ambiguity, checksum strategy), 5 auto-fix adjustments (AC-8/9/10/11, Task 5.8/5.9, Executor=@devops primary, Quality Gate=@qa, Accountable=rafael-costa, deploy_type=none). Conditions: (1) executor MUST coordinate cross-repo commits per Task 5.8; (2) formula authored against local sdist for v0.2.0 dev pass — finalized at epic close per AC-8; (3) `install.sh` invokes `pipx ensurepath` per AC-9; (4) 3-OS matrix excludes Windows native per AC-10 / Epic *Out of Scope*; (5) curl-install checksum risk recorded in docs/guides/homebrew-tap.md per AC-11. |
 | 2026-05-18 | @devops (Gage) | Implementation complete: install.sh bash bootstrap (PEP 668-safe pipx cascade, --dry-run/--check/--local flags); 3-OS smoke matrix building sdist locally + invoking install.sh --local (eliminates PyPI chicken-and-egg per advisor); README full install matrix; docs/guides/homebrew-tap.md (security § + epic-close finalization checklist); Formula/claude-i.rb on rafaelscosta/homebrew-claude-i pointing at GitHub pre-release `v0.2.0-pre` sdist (dev-pass URL). Tasks 5.1-5.8 done. Task 5.7 stretch (auto-update workflow) NOT implemented — manual procedure in homebrew-tap.md instead. Task 5.9 DEFERRED to epic close per AC-8. Local gates green: pytest 68/68, ruff, mypy strict, --version, seed integrity, install.sh --dry-run/--check. Status: Ready for Review. |
+| 2026-05-18 | @qa (Quinn) | Gate: **PASS** (92/100). 10/11 ACs verified end-to-end against local artifacts; AC-1 verified structurally (formula Ruby syntax OK, mixin + depends_on tmux + test do block correct, dev-pass URL `v0.2.0-pre` live with both assets, SHA256 byte-match with `dist/claude_i-0.2.0.tar.gz`). Runtime `brew install` verification enumerated as immediate post-push action. Independent re-run in fresh venv: pytest 68/68, ruff clean, mypy --strict clean (8 files), `--version` = `claude-i 0.2.0`, seed MD5 byte-identical. install.sh functional checks: `--dry-run` exit 0 with expected commands, `--check` exit 2 on clean shell (matches smoke.yml assertion), `--help` self-documenting, unknown flag exit 1 + hint. smoke.yml has 5 jobs (shellcheck + dry-run sanity + 3-OS matrix), all OS jobs build sdist locally and `install.sh --local`. NFRs all PASS. One LOW issue: install.sh:11 docstring says `--check` exits 1, code/smoke expect 2 — cosmetic, non-blocking. Cross-repo coordination clean (Task 5.8 sequence honored). Task 5.9 carryover documented in 3 places. Gate file: `docs/gates/STORY-001.4-gate.md`. Recommended next: @devops `*push` (claude-i first, await smoke green, then tap repo) → manual `brew install` verify on clean macOS → @po `*close-story`. |
