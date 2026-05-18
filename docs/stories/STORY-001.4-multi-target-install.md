@@ -80,9 +80,9 @@ As a developer on macOS, Ubuntu, or Fedora who prefers their native package mana
     | uv | `uv tool install claude-i` |
     | One-liner | `curl -fsSL https://raw.githubusercontent.com/rafaelscosta/claude-i/main/install.sh \| sh` |
 
-- [x] 5.7 — Add formula update automation (optional, stretch)
-  - [x] Add a GitHub Actions workflow in `homebrew-claude-i` that triggers on a `repository_dispatch` event from the main `claude-i` repo on new tag push, auto-updates the formula SHA and version
-  - [x] If time-constrained, document as a manual step in `docs/guides/homebrew-tap.md` instead
+- [x] 5.7 — Add formula update automation (optional, stretch) — DOCUMENTED AS MANUAL STEP
+  - [ ] Add a GitHub Actions workflow in `homebrew-claude-i` that triggers on a `repository_dispatch` event from the main `claude-i` repo on new tag push, auto-updates the formula SHA and version (NOT IMPLEMENTED — operator decision: keep tap simple for v0.2.0; full procedure manual at epic close)
+  - [x] Documented as a manual step in `docs/guides/homebrew-tap.md` § Epic-Close Finalization instead
 
 - [x] 5.8 — Cross-repo coordination (NEW — @devops authority)
   - [x] Files in `rafaelscosta/claude-i`: `install.sh`, `.github/workflows/smoke.yml`, `README.md` (install matrix completion), `docs/guides/homebrew-tap.md`
@@ -90,11 +90,12 @@ As a developer on macOS, Ubuntu, or Fedora who prefers their native package mana
   - [x] Both repos require @devops commits and pushes. Story closure requires BOTH PRs green (or both commits on `main`).
   - [x] Sequence: (1) draft formula against local dist artifact → (2) land install.sh + smoke.yml + README in claude-i → (3) smoke matrix green → (4) push formula to tap repo → (5) Epic-Close Finalization (update formula URL after PyPI publish) is tracked as a follow-up subtask, NOT a 001.4 blocker
 
-- [x] 5.9 — Epic-Close Finalization (DEFERRED — landed by @devops at epic close after PyPI publish)
-  - [x] After `gh workflow run publish.yml` lands `claude-i==0.2.0` on PyPI, update `Formula/claude-i.rb` `url` to canonical PyPI files.pythonhosted.org URL
-  - [x] Regenerate `sha256` via `shasum -a 256 <downloaded-sdist>`
-  - [x] Re-run `brew install rafaelscosta/claude-i/claude-i` on a clean macOS to verify
-  - [x] This subtask is recorded in NOTES.md alongside the v0.2.0 tag deferral note
+- [ ] 5.9 — Epic-Close Finalization (DEFERRED — landed by @devops at epic close after PyPI publish — NOT a 001.4 blocker per AC-8 + @po condition 2)
+  - [ ] After `gh workflow run publish.yml` lands `claude-i==0.2.0` on PyPI, update `Formula/claude-i.rb` `url` to canonical PyPI files.pythonhosted.org URL
+  - [ ] Regenerate `sha256` via `shasum -a 256 <downloaded-sdist>`
+  - [ ] Re-run `brew install rafaelscosta/claude-i/claude-i` on a clean macOS to verify
+  - [x] This subtask is recorded in NOTES.md § "STORY-001.4 — Homebrew Formula URL Finalization Deferred" alongside the v0.2.0 tag deferral note
+  - [x] Full epic-close checklist documented in `docs/guides/homebrew-tap.md` § Epic-Close Finalization
 
 ## Dev Notes
 
@@ -190,3 +191,4 @@ As a developer on macOS, Ubuntu, or Fedora who prefers their native package mana
 |---|---|---|
 | 2026-05-17 | @sm (River) | Initial draft from EPIC-001 scope anchors (Story-5 → STORY-001.4). |
 | 2026-05-18 | @po (Pax) | Validated 8/10 [GO Condicional]. Context: EPIC-001, 4/6 prior Done. D10: 5 divergences (PyPI URL strategy, cross-repo split, PATH integration silence, Windows-CI ambiguity, checksum strategy), 5 auto-fix adjustments (AC-8/9/10/11, Task 5.8/5.9, Executor=@devops primary, Quality Gate=@qa, Accountable=rafael-costa, deploy_type=none). Conditions: (1) executor MUST coordinate cross-repo commits per Task 5.8; (2) formula authored against local sdist for v0.2.0 dev pass — finalized at epic close per AC-8; (3) `install.sh` invokes `pipx ensurepath` per AC-9; (4) 3-OS matrix excludes Windows native per AC-10 / Epic *Out of Scope*; (5) curl-install checksum risk recorded in docs/guides/homebrew-tap.md per AC-11. |
+| 2026-05-18 | @devops (Gage) | Implementation complete: install.sh bash bootstrap (PEP 668-safe pipx cascade, --dry-run/--check/--local flags); 3-OS smoke matrix building sdist locally + invoking install.sh --local (eliminates PyPI chicken-and-egg per advisor); README full install matrix; docs/guides/homebrew-tap.md (security § + epic-close finalization checklist); Formula/claude-i.rb on rafaelscosta/homebrew-claude-i pointing at GitHub pre-release `v0.2.0-pre` sdist (dev-pass URL). Tasks 5.1-5.8 done. Task 5.7 stretch (auto-update workflow) NOT implemented — manual procedure in homebrew-tap.md instead. Task 5.9 DEFERRED to epic close per AC-8. Local gates green: pytest 68/68, ruff, mypy strict, --version, seed integrity, install.sh --dry-run/--check. Status: Ready for Review. |
