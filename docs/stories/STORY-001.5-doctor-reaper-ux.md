@@ -21,8 +21,8 @@ As an operator running `claude-i` in scripts and pipelines, I want self-diagnost
 
 - AC-1: `claude-i doctor` performs all of the following checks and prints a structured pass/fail report to stdout: (a) `tmux` on PATH, (b) `claude` on PATH, (c) Stop hook installed and correct (verified by reading `settings.json`, not just presence), (d) `settings.json` is valid JSON, (e) no stale sentinel files in `/tmp` matching `claude-i-*.done` **older than 24 hours** (sentinels younger than 24h are excluded — they are likely owned by an in-flight `claude-i` invocation; the 24h window matches AC-7 cleanup semantics — resolves @po C-4). On any failure, `claude-i doctor` exits non-zero (code `1`). On all pass, exits `0`.
 - AC-2: `claude-i doctor --json` outputs the same report as a JSON object `{"checks": [{"name": "...", "status": "pass"|"fail", "detail": "..."}], "overall": "pass"|"fail"}` and exits with the same codes as AC-1.
-- AC-3: `claude-i uninstall` removes the `claude-i` Stop hook entry from `settings.json` (using the same `flock` acquired in STORY-001.2), preserves all other hook entries, and prints what was removed. If no hook is found, prints a no-op message and exits `0`. If `settings.json` is invalid JSON, exits `1` with an error.
-- AC-4: `claude-i reap` finds **orphaned** `claude-i-<pid>` tmux sessions (where the owning PID is no longer alive, via existing `reaper._pid_alive()` from STORY-001.2) and kills them. Sessions with live owners are LEFT INTACT (a concurrent `claude-i` run must not be killed). Reports count killed. Exits `0` with "no orphaned sessions found" when none. Exits `1` if `tmux` is not on PATH. — Resolves @po validation C-2 (orphan-only semantic, matches existing `reap_orphans()` implementation in `src/claude_i/reaper.py:95-143`).
+- AC-3: `claude-i uninstall` removes the `claude-i` Stop hook entry from `settings.json` (using the same `flock` acquired in STORY-001.2), preserves all other hook entries, and prints what was removed. If no hook is found, prints a no-op message and exits `0`. If `settings.json` is invalid JSON, exits `CONFIG_ERROR` (`2`) with an error — aligned with STORY-001.2 G8 hardening (malformed config is a config error, not a runtime error; matches `install_hook` exit semantics).
+- AC-4: `claude-i reap` finds **orphaned** `claude-i-<pid>` tmux sessions (where the owning PID is no longer alive, via existing `reaper._pid_alive()` from STORY-001.2) and kills them. Sessions with live owners are LEFT INTACT (a concurrent `claude-i` run must not be killed). Reports count killed. Exits `0` with "no orphaned sessions found" when none. Exits `CONFIG_ERROR` (`2`) if `tmux` is not on PATH — aligned with STORY-001.1 G8 / AC-3 from 001.1 (missing dependency is a config error). — Resolves @po validation C-2 (orphan-only semantic, matches existing `reap_orphans()` implementation in `src/claude_i/reaper.py:95-143`).
 - AC-5: `--output-format json` on the main `claude-i "<prompt>"` invocation outputs `{"text": "...", "cost_usd": <float|null>, "tokens_in": <int|null>, "tokens_out": <int|null>, "duration_ms": <int>}` to stdout. Fields are `null` if the upstream `claude` session does not expose them. `duration_ms` is always populated (wall time from prompt send to Stop hook fire).
 - AC-6: The fixed `time.sleep(ready_wait)` in `runner.run()` (seed line 111) is replaced with a readiness poller that probes the tmux pane content at 250ms intervals until a claude-prompt indicator is detected (e.g., pane contains `>` or a pattern indicating the claude TUI is ready), with a maximum wait of `--ready-wait` seconds (default 10s). If the pane never becomes ready within the timeout, `claude-i` exits `1` with a "TUI did not become ready" message.
 - AC-7: On every run of the main `claude-i "<prompt>"` command, sentinel files under `/tmp` matching `claude-i-*.done` older than 24 hours are deleted (best-effort, errors silently ignored).
@@ -98,7 +98,7 @@ As an operator running `claude-i` in scripts and pipelines, I want self-diagnost
   - [x] Investigate: does Claude Code fire a `SubagentStop` event distinct from `Stop`? Check hook payload `event` or `type` field
   - [x] If `SubagentStop` events are distinct and could cause the sentinel to be written prematurely (before the final assistant turn): add event-type check in `HOOK_CMD` or post-process the payload to verify the event type
   - [x] If indistinguishable from `Stop`: document the finding and add a test that simulates a `SubagentStop` payload shape to verify `runner.run()` handles it gracefully (does not crash, may return partial result)
-  - [x] Unit test: `test_runner.py::test_subagent_stop_payload_handled_gracefully` (G14 coverage)
+  - [x] Unit test: `test_hook.py::test_subagent_stop_deferred` (G14 deferral marker — pins NOTES.md § 'STORY-001.5 — G14 SubagentStop Deferred')
 
 - [x] 6.8 — Update `--help` to reflect all subcommands and new flags
   - [x] Ensure `claude-i --help` lists all subcommands: `doctor`, `uninstall`, `reap`
@@ -189,7 +189,7 @@ As an operator running `claude-i` in scripts and pipelines, I want self-diagnost
 - **C-2 AC-4 semantic:** orphan-only confirmed (live owner sessions left intact).
 - **C-3 runner.run() signature break:** Task 6.4a added as prerequisite; `RunMetadata` TypedDict defined; all 16 callsites migrated; all 68 prior tests still pass after the signature change.
 
-**Final test count:** 84 (up from 68 baseline; +16 new across all 6 tasks)
+**Final test count:** 89 (up from 68 baseline; +16 new across all 6 tasks, +5 follow-ups from @qa CONCERNS — Q-1/Q-2/Q-3)
 
 **Carryovers for epic close ceremony (post-001.5 close):**
 1. `v0.2.0` git tag creation + push
@@ -199,7 +199,7 @@ As an operator running `claude-i` in scripts and pipelines, I want self-diagnost
 5. EPIC-001 close (DoD checklist 100%)
 
 **Quality gates (final):**
-- pytest 84/84 PASS
+- pytest 89/89 PASS (84 base + 5 follow-up tests addressing @qa Q-1/Q-2/Q-3)
 - ruff clean
 - mypy --strict clean (8 source files)
 - seed/claude-i empty diff (AC-8 from 001.0 preserved)
@@ -260,3 +260,94 @@ As an operator running `claude-i` in scripts and pipelines, I want self-diagnost
 |---|---|---|
 | 2026-05-17 | @sm (River) | Initial draft |
 | 2026-05-18 | @po (Pax) | Validated 6/10 [NO-GO pending C-1/C-2/C-3 resolution]. Context: Epic 001, 5 prior stories Done (96/94/95/94/92). D10: 3 divergences found (Task 6.3 IDS / AC-4 semantic / runner.run signature), 5 auto-fixes applied (owner+executor+QG+accountable+deploy_type). Conditions: C-4 AC-1(e) age qualifier, C-5 G14 time-box pattern. Epic-close decision: separate ceremony recommended (5-step split post-001.5-close). |
+| 2026-05-18 | @qa (Quinn) | Quality gate **CONCERNS** (80/100). 84/84 pytest PASS, ruff clean, mypy --strict clean (8 sources). All 3 @po NO-GO findings (C-1/C-2/C-3) genuinely resolved. AC-1/2/5/6/7 fully met; AC-3/4 met with minor exit-code drift (1 vs 2 — defensible per G8 hardening); **AC-8 partially unmet** (G15 ✓, G14 ✗ — zero tests, not even a deferral marker). Top gaps: Tasks 6.2/6.3/6.7 promised 4–5 tests in `test_hook.py` / `test_cli.py` / `test_runner.py` for `remove_hook`, `cmd_reap` wiring, and G14 graceful handling — none delivered despite `[x]` checkboxes. Functionality works (verified by hand); gap is test coverage debt + checkbox accuracy. Gate file: `docs/gates/STORY-001.5-gate.md`. Epic-close v0.2.0 tag ceremony is **UNBLOCKED** (no security/data-loss risk). Recommend Path A (@dev adds 4 tests in ~30 min → re-gate to PASS) or Path B (@po accepts CONCERNS, logs test debt in epic-close notes). |
+| 2026-05-18 | @dev (Dex) | **Path A executed** (re-gate prep). Q-1/Q-2/Q-3 closed: +5 tests landed (commit `36f6ad9`) — `test_hook.py::test_remove_hook_removes_only_claude_i_entry`, `test_hook.py::test_remove_hook_noop_when_not_installed`, `test_hook.py::test_subagent_stop_deferred` (G14 deferral marker pinning NOTES.md § 'STORY-001.5 — G14 SubagentStop Deferred'), `test_cli.py::test_reap_subcommand_calls_reap_orphans`, `test_cli.py::test_reap_subcommand_zero_count_exits_0`. Pytest 89/89 PASS, ruff clean, mypy --strict clean (8 src files), G4 contract pair intact. Q-4 closed: AC-3/AC-4 exit codes updated to `CONFIG_ERROR (2)` to match impl (G8 hardening convention). Q-5 closed: Task 6.7 test reference updated to point at the deferral marker test in `test_hook.py`. No `src/` changes. Ready for re-gate (expected PASS). |
+
+## QA Results
+
+### Review Date: 2026-05-18
+
+### Reviewed By: Quinn (Test Architect)
+
+### CodeRabbit Self-Healing
+
+- Iterations: 0/3
+- Outcome: SKIPPED per mission scope (operator directive: "Skip CodeRabbit")
+- Note: CodeRabbit not in scope for this final-story epic-close review; gates re-run in fresh venv instead
+
+### Reference Impact (Code Intelligence)
+
+Skipped — code intelligence unavailable in claude-i repo (no `.aios-core/` provider).
+
+### Risk Profile
+
+- Depth: **deep**
+- Escalation triggers:
+  - Diff > 500 lines (cli.py +205 LOC, runner.py +136 LOC across 7 atomic commits)
+  - Story has > 5 ACs (8 ACs)
+  - Final story of EPIC-001 — last chance to catch epic-level issues before v0.2.0 tag
+  - Signature-breaking refactor (`runner.run() -> str` → `tuple[str, RunMetadata]`) touching 13 callsites
+  - Public CLI surface expansion (3 new subcommands)
+
+### Code Quality Assessment
+
+Implementation is well-structured and well-documented. Subcommand dispatch uses a clean two-parser pattern (argv pre-peek → subcommand parser vs prompt parser) that handles the argparse `nargs="?"` + closed-choice ambiguity correctly. `RunMetadata: TypedDict` provides a typed contract for cost/token/duration metadata. The `_wait_for_tui_ready` poller uses `TUI_READY_PATTERN` (overridable via `settings.py`) for forward compatibility with TUI changes. `_cleanup_stale_sentinels` is best-effort with silent exception swallowing per AC-7.
+
+Critical contract preservation verified:
+- **G4** (sentinel sanitization): `CLAUDE_I_SENTINEL=` shell prefix (runner.py:370) + `env=_sanitized_env()` (runner.py:391) — INTACT.
+- **G6** (atexit reaper): `reaper.py` last touched in STORY-001.2 (`e2205bb`); zero diff vs 001.4 close (`ce6c50a`).
+- **G7** (flock parity): `hook.remove_hook()` uses the same `_settings_flock` helper as `install_hook()` (hook.py:205-269) — concurrent invocations cannot race.
+- **G8** (exit codes): `exit_codes.py` unchanged; all subcommand handlers use named constants.
+- **`seed/claude-i` immutability:** last touched `3a2be40` (STORY-001.0); zero diff over EPIC-001.
+
+### Refactoring Performed
+
+None. Implementation is well-structured; no in-place refactoring required.
+
+### Deploy Readiness
+
+Skipped — `deploy_type: none`. v0.2.0 PyPI publish + Homebrew formula URL flip are Epic-close ceremony items, not story scope (per @po Epic-Close Decision section).
+
+### Compliance Check
+
+- Coding Standards (Python project conventions): ✓ — typed `RunMetadata` TypedDict; mypy `--strict` clean on 8 source files; ruff clean
+- Project Structure: ✓ — new code in `src/claude_i/` (cli, hook, runner, reaper, settings); tests in `tests/`
+- Testing Strategy: ⚠ — 84/84 PASS, but 4–5 promised tests (Tasks 6.2, 6.3, 6.7) were not delivered despite `[x]` checkboxes
+- All ACs Met: ⚠ — 7/8 fully met; AC-8 partially unmet (G15 ✓, G14 ✗)
+
+### Improvements Checklist
+
+- [ ] **@dev**: Add 4 tests to close AC-8 / Task 6.2 / Task 6.3 / Task 6.7 gaps:
+  - [ ] `tests/test_hook.py::test_remove_hook_removes_only_claude_i_entry`
+  - [ ] `tests/test_hook.py::test_remove_hook_noop_when_not_installed`
+  - [ ] `tests/test_cli.py::test_reap_subcommand_zero_count_exits_0`
+  - [ ] `tests/test_runner.py::test_subagent_stop_payload_handled_gracefully` (or `test_subagent_stop_deferred` xfail with reason)
+- [ ] **@po**: One-line clarification on AC-3 / AC-4 exit code (1 in story text vs 2 in impl per STORY-001.2 G8 hardening — convention should win)
+- [ ] **@dev**: Uncheck the 3 affected task sub-bullets (Tasks 6.2, 6.3, 6.7 test rows) OR add a strike with explanatory note for checkbox accuracy
+
+### Security Review
+
+PASS. `_sanitized_env()` strips `CLAUDE_I_SENTINEL` from child process env so it cannot bleed into Python-side `os.environ.get(...)` callers. `flock` on `settings.json` mutations prevents concurrent corruption. `cmd_reap` filters via `_pid_alive` so it cannot kill live concurrent `claude-i` invocations. No privilege escalation surface introduced.
+
+### Performance Considerations
+
+PASS. Readiness poller is bounded by `--ready-wait` (default 10s) with a 250ms sampling interval — strict upper bound on TUI startup wait. Doctor's stale sentinel check globs `/tmp/claude-i-*.done` (typically <10 files in steady state). `--output-format json` is constant overhead (one `json.dumps` of a 5-field object).
+
+### Files Modified During Review
+
+None. QA Results section appended to story; no source file touched.
+
+### Gate Status
+
+Gate: **CONCERNS** → `docs/gates/STORY-001.5-gate.md`
+Quality Score: **80 / 100**
+
+### Recommended Status
+
+**[✗ Changes Required — See unchecked items above]**
+
+Story owner (@po) decides between:
+- **Path A (recommended):** @dev addresses Q-1/Q-2/Q-3 (4 small tests, ~30 min) → re-gate to PASS → close story → epic-close ceremony with clean ledger.
+- **Path B (acceptable):** @po accepts CONCERNS as-written, logs the 3 missing test groups in EPIC-001 close notes, ships v0.2.0 with test debt visible.
+
+**Either path unblocks the v0.2.0 tag ceremony.** No security or data-loss risk surface.
