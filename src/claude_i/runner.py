@@ -142,6 +142,47 @@ def _build_metadata(
     )
 
 
+#: STORY-001.5 / Task 6.6 / Gap G15 — sentinel staleness threshold.
+#: Matches the doctor check (e) 24h window so a clean doctor PASS and an
+#: in-flight runner.run() coexist without false positives.
+_STALE_SENTINEL_SECONDS: float = 86400.0  # 24h
+
+
+def _cleanup_stale_sentinels() -> None:
+    """Delete ``/tmp/claude-i-*.done`` files older than 24h.
+
+    STORY-001.5 / Task 6.6 / Gap G15. Best-effort:
+
+    - ``stat()`` failures (symlinks, perms) silently skip the file.
+    - ``unlink(missing_ok=True)`` swallows races where another claude-i
+      process cleaned the file between glob and unlink.
+    - Any unexpected exception is caught and ignored — this is housekeeping,
+      not a control-flow gate. ``runner.run`` must NEVER fail because of
+      cleanup logic.
+
+    Companion to ``runner.run``'s ``finally`` block which removes THIS run's
+    sentinel + payload; this helper handles the orphan case where a prior
+    run crashed before reaching its finally.
+    """
+    threshold = time.time() - _STALE_SENTINEL_SECONDS
+    try:
+        candidates = list(Path("/tmp").glob("claude-i-*.done"))
+    except Exception:
+        # Glob itself failed (highly unlikely) — give up silently.
+        return
+    for path in candidates:
+        try:
+            if path.stat().st_mtime < threshold:
+                path.unlink(missing_ok=True)
+                # Companion payload file uses the same prefix with .json
+                # tacked on. Best-effort removal — it may or may not exist.
+                payload_path = Path(str(path) + ".json")
+                payload_path.unlink(missing_ok=True)
+        except Exception:
+            # Per-file failure is silently swallowed — best-effort housekeeping.
+            continue
+
+
 #: STORY-001.5 / Task 6.5 / Gap G17 — readiness poller default poll interval.
 #: 250ms balances "responsive" (poller returns shortly after the TUI is ready)
 #: against "noisy" (every poll fires a ``tmux capture-pane`` subprocess).
@@ -303,6 +344,13 @@ def run(
     # Stop-hook wait. ``time.monotonic()`` is the right primitive — immune
     # to wall-clock jumps and only goes forward.
     start_time = time.monotonic()
+
+    # STORY-001.5 / Task 6.6 / Gap G15 — best-effort cleanup of stale
+    # sentinel files left behind by prior crashed / SIGKILLed claude-i runs.
+    # Runs before any new mkstemp to ensure /tmp stays tidy on systems
+    # without aggressive tmpfs cleanup. Errors are silenced — this is a
+    # housekeeping nicety, never blocking.
+    _cleanup_stale_sentinels()
 
     # G5 — ``tempfile.mkstemp`` is atomic (create+open) and avoids the TOCTOU
     # race that ``tempfile.mktemp`` exposes. The fd is closed immediately

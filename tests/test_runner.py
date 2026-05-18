@@ -89,6 +89,9 @@ def _drive_run_until_first_subprocess_call(
     # SIGTERM handler in the process. The G6 test suite verifies wiring
     # explicitly; here we just need run() to succeed.
     monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _session: None)
+    # STORY-001.5 / Task 6.6 — neutralize stale-sentinel cleanup in stubs so
+    # tests stay deterministic regardless of /tmp state on the host machine.
+    monkeypatch.setattr(runner, "_cleanup_stale_sentinels", lambda: None)
 
     # ready_wait=0 / timeout=1 keep the call short even if anything else slips.
     # G8: after the four-branch RuntimeError refactor, a stubbed empty
@@ -195,6 +198,9 @@ def test_sentinel_uses_mkstemp(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
     # G6 — silence reaper registration (see _drive helper).
     monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _session: None)
+    # STORY-001.5 / Task 6.6 — neutralize stale-sentinel cleanup in stubs so
+    # tests stay deterministic regardless of /tmp state on the host machine.
+    monkeypatch.setattr(runner, "_cleanup_stale_sentinels", lambda: None)
 
     try:
         runner.run(prompt="hi", extra_args=[], verbose=False, ready_wait=0.0, timeout=1)
@@ -557,3 +563,69 @@ def test_readiness_poller_accepts_unicode_prompt(
     monkeypatch.setattr(runner, "tmux", fake_tmux)
     runner._wait_for_tui_ready("claude-i-789", timeout=1.0, interval=0.01)
     # No exception → poller detected the powerline prompt glyph.
+
+
+# ---------------------------------------------------------------------------
+# STORY-001.5 / Task 6.6 / Gap G15 — stale sentinel cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_stale_sentinels_cleaned_on_run(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_cleanup_stale_sentinels`` deletes files older than 24h (G15)."""
+    import os
+    import time as _time
+    from pathlib import Path as _Path
+
+    tmp_dir = _Path(str(tmp_path))
+    recent = tmp_dir / "claude-i-recent.done"
+    old = tmp_dir / "claude-i-old.done"
+    old_payload = tmp_dir / "claude-i-old.done.json"
+    recent.touch()
+    old.touch()
+    old_payload.touch()
+    twenty_five_hours_ago = _time.time() - (25 * 3600)
+    os.utime(old, (twenty_five_hours_ago, twenty_five_hours_ago))
+    os.utime(old_payload, (twenty_five_hours_ago, twenty_five_hours_ago))
+
+    # Redirect Path("/tmp") to our tmp_dir so the cleanup helper scans there.
+    real_path_cls = runner.Path
+
+    def fake_path(arg: str) -> _Path:
+        if arg == "/tmp":
+            return tmp_dir
+        return real_path_cls(arg)
+
+    monkeypatch.setattr(runner, "Path", fake_path)
+    runner._cleanup_stale_sentinels()
+    assert not old.exists(), "stale sentinel must be deleted"
+    assert not old_payload.exists(), "stale payload sidecar must be deleted"
+    assert recent.exists(), "fresh sentinel must NOT be deleted (in-flight run)"
+
+
+def test_stale_sentinels_silently_swallows_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cleanup must NEVER raise — best-effort housekeeping only.
+
+    Stubs ``Path("/tmp").glob`` to raise. The helper must catch and return
+    without propagating; ``runner.run`` depends on this contract because the
+    cleanup runs BEFORE the session is created (a raise here would abort
+    the run before any useful work).
+    """
+    real_path_cls = runner.Path
+
+    class BoomPath:
+        def __init__(self, _arg: str) -> None: ...
+        def glob(self, _pattern: str) -> None:
+            raise OSError("boom")
+
+    def fake_path(arg: str) -> Any:
+        if arg == "/tmp":
+            return BoomPath(arg)
+        return real_path_cls(arg)
+
+    monkeypatch.setattr(runner, "Path", fake_path)
+    # Must not raise.
+    runner._cleanup_stale_sentinels()
