@@ -193,3 +193,97 @@ def test_install_then_detect_roundtrip(
     assert hook.hook_installed() is False
     hook.install_hook()
     assert hook.hook_installed() is True
+
+
+# STORY-001.2 / Task 3.4 / Gap G7 — fcntl.flock on install_hook mutation.
+
+
+def test_install_hook_acquires_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``install_hook`` calls ``fcntl.flock`` with ``LOCK_EX`` before writing."""
+    import fcntl as real_fcntl
+
+    _redirect_settings(tmp_path, monkeypatch)
+    flock_calls: list[tuple[int, int]] = []
+
+    real_flock = real_fcntl.flock
+
+    def fake_flock(fd: int, op: int) -> None:
+        flock_calls.append((fd, op))
+        # Delegate to real flock so the lock actually works.
+        real_flock(fd, op)
+
+    monkeypatch.setattr(hook.fcntl, "flock", fake_flock)
+    hook.install_hook()
+
+    # Expect at least one LOCK_EX|LOCK_NB (acquire) and one LOCK_UN (release).
+    ops = [op for _fd, op in flock_calls]
+    assert real_fcntl.LOCK_EX | real_fcntl.LOCK_NB in ops, (
+        f"install_hook must acquire flock with LOCK_EX|LOCK_NB; got ops: {ops}"
+    )
+    assert real_fcntl.LOCK_UN in ops, (
+        f"install_hook must release flock with LOCK_UN; got ops: {ops}"
+    )
+
+
+def test_install_hook_creates_lock_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``install_hook`` creates the sibling ``claude-i.lock`` file."""
+    target = _redirect_settings(tmp_path, monkeypatch)
+    hook.install_hook()
+    lock_file = target.parent / "claude-i.lock"
+    assert lock_file.exists(), (
+        "install_hook must create a sibling claude-i.lock for advisory locking"
+    )
+
+
+def test_install_hook_exits_on_lock_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``install_hook`` exits with code 1 when the lock cannot be acquired.
+
+    Simulates contention by stubbing ``fcntl.flock`` to always raise
+    ``BlockingIOError``. The retry loop hits its deadline (shortened to
+    10ms for the test) and ``sys.exit(1)`` fires.
+    """
+    _redirect_settings(tmp_path, monkeypatch)
+
+    def always_blocked(_fd: int, _op: int) -> None:
+        raise BlockingIOError("EWOULDBLOCK")
+
+    monkeypatch.setattr(hook.fcntl, "flock", always_blocked)
+    monkeypatch.setattr(hook, "_LOCK_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(hook, "_LOCK_RETRY_INTERVAL", 0.005)
+
+    with pytest.raises(SystemExit) as exc:
+        hook.install_hook()
+    assert exc.value.code == 1
+
+
+def test_install_hook_preserves_existing_hooks_with_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G7 regression: locking does not break the G2/Task 2.7 append behavior."""
+    target = _redirect_settings(tmp_path, monkeypatch)
+    pre_existing = {
+        "hooks": {
+            "Stop": [
+                {
+                    "hooks": [
+                        {
+                            "type": "http",
+                            "url": "http://localhost:7483/hooks/stop",
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+    target.write_text(json.dumps(pre_existing))
+    hook.install_hook()
+    cfg = json.loads(target.read_text())
+    # Both entries survive — same assertion as test_install_hook_preserves_existing_hooks.
+    stop_list = cfg["hooks"]["Stop"]
+    assert len(stop_list) == 2
