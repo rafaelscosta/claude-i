@@ -355,6 +355,10 @@ def test_empty_response_returns_empty_string(
 
     cli.main translates this to exit 0 (with --allow-empty) or exit 1
     (without). The runner itself returns the empty string verbatim.
+
+    STORY-001.5 / Task 6.4a — ``runner.run`` now returns
+    ``(text, RunMetadata)``. Branch 1 still emits ``""`` as the text; the
+    metadata accompanies it so ``--output-format json`` can serialize.
     """
     _stub_runner_io(
         monkeypatch,
@@ -369,8 +373,15 @@ def test_empty_response_returns_empty_string(
             ),
         ],
     )
-    result = runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
-    assert result == ""
+    text, metadata = runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
+    assert text == ""
+    # G11 contract: ``duration_ms`` is always populated; cost/token fields
+    # may be ``None`` when the hook payload doesn't surface them.
+    assert isinstance(metadata["duration_ms"], int)
+    assert metadata["duration_ms"] >= 0
+    assert "cost_usd" in metadata
+    assert "tokens_in" in metadata
+    assert "tokens_out" in metadata
 
 
 def test_non_empty_response_returns_text(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -391,8 +402,8 @@ def test_non_empty_response_returns_text(monkeypatch: pytest.MonkeyPatch) -> Non
             ),
         ],
     )
-    result = runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
-    assert result == "hello world"
+    text, _metadata = runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
+    assert text == "hello world"
 
 
 # STORY-001.2 / Task 3.7 / Gap G13 — UTF-8 encoding for tmux IPC.
@@ -439,8 +450,8 @@ def test_unicode_prompt_does_not_crash(monkeypatch: pytest.MonkeyPatch) -> None:
         ],
     )
     prompt = "missão crítica — 漢字 — \U0001F680"
-    result = runner.run(prompt, [], verbose=False, ready_wait=0.0, timeout=1)
-    assert result == "ok"
+    text, _metadata = runner.run(prompt, [], verbose=False, ready_wait=0.0, timeout=1)
+    assert text == "ok"
 
 
 def test_unicode_encode_warning_path(

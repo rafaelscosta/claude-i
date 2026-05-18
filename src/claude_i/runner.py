@@ -44,13 +44,100 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import TypedDict
 
 from claude_i import reaper
+
+
+class RunMetadata(TypedDict):
+    """Metadata returned by ``runner.run`` alongside the assistant text.
+
+    STORY-001.5 / Task 6.4a — Gap G11 signature migration.
+
+    ``duration_ms`` is always populated (wall time from session start to Stop
+    hook fire). The cost/token fields are nullable because the Stop hook
+    payload shape depends on the upstream ``claude`` version — older versions
+    do not surface these. ``cli.main`` serializes the metadata when the caller
+    passes ``--output-format json`` (Task 6.4 / AC-5).
+    """
+
+    duration_ms: int
+    cost_usd: float | None
+    tokens_in: int | None
+    tokens_out: int | None
 
 #: Env vars that must not leak into sibling subprocesses spawned by claude-i.
 #: Currently only ``CLAUDE_I_SENTINEL`` — kept as a constant so future stories
 #: can extend the strip-list without touching call sites.
 _STRIPPED_ENV_VARS: tuple[str, ...] = ("CLAUDE_I_SENTINEL",)
+
+
+def _build_metadata(
+    start_time: float, hook_input: dict[str, object]
+) -> RunMetadata:
+    """Construct a ``RunMetadata`` from the start time and Stop hook payload.
+
+    STORY-001.5 / Task 6.4 / Gap G11.
+
+    ``duration_ms`` is the wall-clock time from ``runner.run`` entry to this
+    helper call (i.e., to the Stop hook fire). Cost / token fields are pulled
+    best-effort from the hook payload; missing fields produce ``None`` rather
+    than zeros so consumers can distinguish "not reported" from "zero usage".
+
+    Tolerated payload shapes (probed in order):
+    - top-level ``cost_usd`` / ``tokens_in`` / ``tokens_out``
+    - nested under ``usage`` (Claude SDK convention): ``usage.cost_usd``,
+      ``usage.input_tokens``, ``usage.output_tokens``
+
+    No type coercion beyond ``int()`` / ``float()`` casts — malformed values
+    become ``None`` rather than raising.
+    """
+    duration_ms = int((time.monotonic() - start_time) * 1000)
+
+    def _maybe_float(value: object) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, (int, float, str)):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _maybe_int(value: object) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            # ``bool`` is a subclass of ``int`` in Python; reject it explicitly
+            # so a stray ``True``/``False`` in the payload doesn't become 1/0.
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, (float, str)):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    raw_usage = hook_input.get("usage") if isinstance(hook_input, dict) else None
+    usage: dict[str, object] = raw_usage if isinstance(raw_usage, dict) else {}
+
+    cost = _maybe_float(hook_input.get("cost_usd")) or _maybe_float(
+        usage.get("cost_usd")
+    )
+    tokens_in = _maybe_int(hook_input.get("tokens_in")) or _maybe_int(
+        usage.get("input_tokens")
+    )
+    tokens_out = _maybe_int(hook_input.get("tokens_out")) or _maybe_int(
+        usage.get("output_tokens")
+    )
+    return RunMetadata(
+        duration_ms=duration_ms,
+        cost_usd=cost,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+    )
 
 
 def _sanitized_env() -> dict[str, str]:
@@ -123,16 +210,22 @@ def run(
     verbose: bool,
     ready_wait: float,
     timeout: int,
-) -> str:
+) -> tuple[str, RunMetadata]:
     """Drive an interactive ``claude`` session via tmux and return the final
-    assistant text.
+    assistant text along with run metadata.
+
+    STORY-001.5 / Task 6.4a / Gap G11 — signature migration. Returns
+    ``(text, metadata)`` instead of bare ``text``. The metadata always
+    contains ``duration_ms``; ``cost_usd`` / ``tokens_in`` / ``tokens_out``
+    are ``None`` when the Stop hook payload does not surface them (older
+    upstream ``claude`` versions).
 
     Return / raise contract (STORY-001.2 / Gap G8 — AC-7, four branches):
 
     1. **Verified-empty assistant turn** — transcript parsed, assistant
        turn exists, but the ``content`` list yields no ``type=="text"``
-       blocks. ``run()`` returns ``""``. ``cli.main`` translates: exit 0
-       if ``--allow-empty``, otherwise exit ``RUNTIME_ERROR``.
+       blocks. ``run()`` returns ``("", metadata)``. ``cli.main`` translates:
+       exit 0 if ``--allow-empty``, otherwise exit ``RUNTIME_ERROR``.
     2. **No assistant turn found** — transcript parsed but no message with
        ``role == "assistant"``. ``run()`` raises
        ``RuntimeError("no assistant message in transcript")``.
@@ -148,6 +241,13 @@ def run(
     Pre-existing branches: ``TimeoutError`` on Stop-hook timeout
     propagates to ``cli.main`` which translates to ``RUNTIME_ERROR``.
     """
+    # STORY-001.5 / Task 6.4 — wall-clock timing for ``duration_ms`` in
+    # ``RunMetadata``. Captured at the top so the metric covers the full
+    # session lifecycle including TUI startup, prompt delivery, and the
+    # Stop-hook wait. ``time.monotonic()`` is the right primitive — immune
+    # to wall-clock jumps and only goes forward.
+    start_time = time.monotonic()
+
     # G5 — ``tempfile.mkstemp`` is atomic (create+open) and avoids the TOCTOU
     # race that ``tempfile.mktemp`` exposes. The fd is closed immediately
     # because the hook (not claude-i) writes the ``.json`` payload — we only
@@ -250,6 +350,12 @@ def run(
         if not transcript.exists():
             raise RuntimeError(f"transcript missing: {transcript}")
 
+        # Task 6.4 — extract optional cost/token metrics from the hook
+        # payload. Field names follow the upstream Stop hook contract; when
+        # absent (older claude versions), fall back to ``None`` so callers
+        # can still serialize ``--output-format json`` without crashing.
+        metadata = _build_metadata(start_time, hook_input)
+
         last: dict[str, object] | None = None
         for line in transcript.read_text().splitlines():
             try:
@@ -268,12 +374,13 @@ def run(
         # has no type=="text" blocks → empty string return. cli.main routes
         # this through --allow-empty.
         if not isinstance(content, list):
-            return ""
-        return "".join(
+            return "", metadata
+        text = "".join(
             b.get("text", "")
             for b in content
             if isinstance(b, dict) and b.get("type") == "text"
         )
+        return text, metadata
     finally:
         tail_stop.set()
         if tail_thread:

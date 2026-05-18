@@ -18,6 +18,17 @@ import pytest
 
 from claude_i import cli
 
+#: Default metadata stub returned by mocked ``runner.run`` calls in CLI tests.
+#: STORY-001.5 / Task 6.4a — signature is ``(text, RunMetadata)``; tests that
+#: don't care about metadata still need to return a well-formed tuple so
+#: ``cli.main`` can destructure without error.
+_DEFAULT_METADATA = {
+    "duration_ms": 42,
+    "cost_usd": None,
+    "tokens_in": None,
+    "tokens_out": None,
+}
+
 
 def _invoke_main(argv: list[str]) -> MagicMock:
     """Run ``cli.main`` with the given argv, patching deps/hook/runner.
@@ -27,7 +38,9 @@ def _invoke_main(argv: list[str]) -> MagicMock:
     with (
         patch.object(cli.deps, "check_deps") as _cd,
         patch.object(cli.hook, "ensure_hook") as _eh,
-        patch.object(cli.runner, "run", return_value="ok") as run_mock,
+        patch.object(
+            cli.runner, "run", return_value=("ok", _DEFAULT_METADATA)
+        ) as run_mock,
         patch("sys.argv", ["claude-i", *argv]),
     ):
         cli.main()
@@ -83,7 +96,7 @@ def test_deps_called_before_hook() -> None:
     with (
         patch.object(cli.deps, "check_deps", side_effect=record_deps),
         patch.object(cli.hook, "ensure_hook", side_effect=record_hook),
-        patch.object(cli.runner, "run", return_value="ok"),
+        patch.object(cli.runner, "run", return_value=("ok", _DEFAULT_METADATA)),
         patch("sys.argv", ["claude-i", "hello"]),
     ):
         cli.main()
@@ -181,7 +194,7 @@ def test_no_allow_empty_rejects_empty(capsys: pytest.CaptureFixture[str]) -> Non
     with (
         patch.object(cli.deps, "check_deps"),
         patch.object(cli.hook, "ensure_hook"),
-        patch.object(cli.runner, "run", return_value=""),
+        patch.object(cli.runner, "run", return_value=("", _DEFAULT_METADATA)),
         patch("sys.argv", ["claude-i", "hello"]),
     ):
         with pytest.raises(SystemExit) as exc:
@@ -197,7 +210,7 @@ def test_allow_empty_accepts_empty(capsys: pytest.CaptureFixture[str]) -> None:
     with (
         patch.object(cli.deps, "check_deps"),
         patch.object(cli.hook, "ensure_hook"),
-        patch.object(cli.runner, "run", return_value=""),
+        patch.object(cli.runner, "run", return_value=("", _DEFAULT_METADATA)),
         patch("sys.argv", ["claude-i", "--allow-empty", "hello"]),
     ):
         with pytest.raises(SystemExit) as exc:
@@ -210,7 +223,9 @@ def test_non_empty_response_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
     with (
         patch.object(cli.deps, "check_deps"),
         patch.object(cli.hook, "ensure_hook"),
-        patch.object(cli.runner, "run", return_value="hello world"),
+        patch.object(
+            cli.runner, "run", return_value=("hello world", _DEFAULT_METADATA)
+        ),
         patch("sys.argv", ["claude-i", "hello"]),
     ):
         # main() does not call sys.exit in the happy path; it just prints.

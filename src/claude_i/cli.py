@@ -161,8 +161,12 @@ def main() -> None:
 
     # G8 — translate runner.run's return / raise contract into exit codes.
     # See runner.run docstring for the four-branch contract (AC-7).
+    # STORY-001.5 / Task 6.4a — runner.run now returns ``(text, metadata)``.
+    # ``metadata`` is unused here today; Task 6.4 wires it to ``--output-format
+    # json``. Destructure unconditionally so the signature contract is
+    # exercised in every code path.
     try:
-        response = runner.run(
+        response, _metadata = runner.run(
             args.prompt,
             extra_args,
             args.verbose,
