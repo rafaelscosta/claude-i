@@ -393,3 +393,74 @@ def test_non_empty_response_returns_text(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     result = runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
     assert result == "hello world"
+
+
+# STORY-001.2 / Task 3.7 / Gap G13 — UTF-8 encoding for tmux IPC.
+
+
+def test_tmux_subprocess_uses_utf8_encoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``runner.tmux`` passes ``encoding="utf-8"`` to ``subprocess.run``.
+
+    On headless Linux systems where the locale defaults to ASCII, the
+    absence of an explicit encoding causes ``subprocess.run(..., text=True)``
+    to crash on multi-byte input. G13 forces UTF-8 at every tmux call site.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_run(*args: Any, **kwargs: Any) -> Any:
+        captured["kwargs"] = kwargs
+        result = MagicMock()
+        result.stdout = ""
+        result.stderr = ""
+        result.returncode = 0
+        return result
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    runner.tmux("list-sessions", check=False)
+    assert captured["kwargs"].get("encoding") == "utf-8"
+    assert captured["kwargs"].get("errors") == "replace"
+
+
+def test_unicode_prompt_does_not_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A prompt with PT-BR accents + emoji + CJK survives the round trip."""
+    _stub_runner_io(
+        monkeypatch,
+        transcript_lines=[
+            json.dumps(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "ok"}],
+                    }
+                }
+            ),
+        ],
+    )
+    prompt = "missão crítica — 漢字 — \U0001F680"
+    result = runner.run(prompt, [], verbose=False, ready_wait=0.0, timeout=1)
+    assert result == "ok"
+
+
+def test_unicode_encode_warning_path(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A lone-surrogate prompt logs a warning but does not crash."""
+    _stub_runner_io(
+        monkeypatch,
+        transcript_lines=[
+            json.dumps(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "ok"}],
+                    }
+                }
+            ),
+        ],
+    )
+    bad_prompt = "broken: \ud83d"
+    runner.run(bad_prompt, [], verbose=False, ready_wait=0.0, timeout=1)
+    err = capsys.readouterr().err
+    assert "cannot be encoded as UTF-8" in err
