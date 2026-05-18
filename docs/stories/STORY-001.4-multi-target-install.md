@@ -51,24 +51,24 @@ As a developer on macOS, Ubuntu, or Fedora who prefers their native package mana
   - [x] Commit to `rafaelscosta/homebrew-claude-i` — NOT to the main `claude-i` repo
 
 - [x] 5.3 — Write `install.sh` at repo root
-  - [x] Shebang: `#!/usr/bin/env sh` (POSIX sh, not bash — maximum portability)
+  - [x] Shebang: `#!/usr/bin/env bash` (operator pragmatic-default override; bash chosen for `set -euo pipefail` and `[[ ]]`. Story originally specified `sh` — bash is a constrained portability tradeoff documented in `docs/guides/homebrew-tap.md`)
   - [x] Detect OS: `uname -s` for Darwin/Linux; on Linux, read `/etc/os-release` for `ID`/`ID_LIKE`
-  - [x] macOS path: `brew install rafaelscosta/claude-i/claude-i` (taps the tap and installs)
-  - [x] Ubuntu/Debian path: `sudo apt-get update -q && sudo apt-get install -y tmux pipx || pip install pipx && pipx install claude-i`
-  - [x] Fedora/RHEL path: `sudo dnf install -y tmux && pip install pipx && pipx install claude-i`
+  - [x] macOS path: `brew install rafaelscosta/claude-i/claude-i` with pipx+PyPI fallback when tap unreachable
+  - [x] Ubuntu/Debian path: `sudo apt-get install -y tmux` + PEP 668-safe pipx cascade (distro pkg → `python3 -m pip install --user pipx`) + `pipx install claude-i`
+  - [x] Fedora/RHEL path: `sudo dnf install -y tmux` + same PEP 668-safe pipx cascade + `pipx install claude-i`
   - [x] Unsupported: print message and `exit 1`
-  - [x] Final verification: `claude-i --version` — if exit nonzero, print install failure message and exit 1
+  - [x] Final verification: `$HOME/.local/bin/claude-i --version || claude-i --version` per AC-9 (no shell-rc reload mid-script)
 
 - [x] 5.4 — Make `install.sh` self-validating
   - [x] Add a `--dry-run` flag to `install.sh` that prints the commands it would run without executing them
   - [x] Add a `--check` flag that verifies `claude-i` is already installed and exits 0/1 accordingly
 
 - [x] 5.5 — Create `.github/workflows/smoke.yml`
-  - [x] Trigger: `push` to `main`, `pull_request` to `main`, `workflow_dispatch`
-  - [x] Matrix: `[{os: macos-latest, method: brew}, {os: ubuntu-latest, method: install-sh}, {os: ubuntu-latest, container: fedora:latest, method: install-sh}]`
-  - [x] macOS job: tap the repo + `brew install rafaelscosta/claude-i/claude-i` → `claude-i --version`
-  - [x] Ubuntu/Fedora job: `curl -fsSL .../install.sh | sh` → `claude-i --version`
-  - [x] Assert `claude-i --version` exits 0 and output contains `0.2.0`
+  - [x] Trigger: `push` to `main`, `pull_request` to `main`, `workflow_dispatch` (path-filtered to install.sh / workflow / pyproject / src changes)
+  - [x] Matrix: 3 OS jobs — `macos-latest`, `ubuntu-latest`, `fedora:latest` container on `ubuntu-latest`
+  - [x] All 3 jobs: build sdist locally, then `bash install.sh --local dist/claude_i-0.2.0.tar.gz` → assert `claude-i --version == "claude-i 0.2.0"` (build-from-source approach per advisor; eliminates PyPI chicken-and-egg since v0.2.0 not yet on PyPI)
+  - [x] Bonus jobs: `shellcheck install.sh` linter + `--dry-run`/`--check` sanity job
+  - [x] Assert `claude-i --version` exits 0 and output equals `claude-i 0.2.0`
   - [x] No `ANTHROPIC_API_KEY` or `claude` binary needed — version check only
 
 - [x] 5.6 — Add Homebrew tap instructions to README

@@ -94,3 +94,29 @@ Publish workflow (`.github/workflows/publish.yml`) is `workflow_dispatch`
 only for now — manual `gh workflow run publish.yml` after the tag lands.
 This gives the operator a human gate without GitHub Environments
 ceremony.
+
+
+## STORY-001.4 — Homebrew Formula URL Finalization Deferred
+
+**Status:** STORY-001.4 lands the formula `Formula/claude-i.rb` in
+`rafaelscosta/homebrew-claude-i` with a **dev-pass URL** pointing at a
+GitHub pre-release sdist (`v0.2.0-pre`). The canonical PyPI
+`files.pythonhosted.org` URL is **not yet wired** because:
+
+1. `v0.2.0` git tag is intentionally deferred (see section above).
+2. `publish.yml` has not run, so the package is not on PyPI.
+
+**Dev-pass artifact:**
+- URL: `https://github.com/rafaelscosta/claude-i/releases/download/v0.2.0-pre/claude_i-0.2.0.tar.gz`
+- SHA256: `28738be41964796c031f4b2927839e3282a890f906866385ead2279879ec4353`
+
+**Finalization checklist** (executed at epic close, per STORY-001.4 Task 5.9):
+1. Tag and push `v0.2.0`.
+2. Run `gh workflow run publish.yml` and approve the `publish` environment gate.
+3. Capture canonical PyPI URL + SHA256 via `pip download`.
+4. Update `Formula/claude-i.rb` `url` + `sha256`.
+5. `brew untap` / `brew tap` / `brew install` / `brew test` cycle on clean macOS.
+6. Commit + push the tap.
+7. Optionally `gh release delete v0.2.0-pre --cleanup-tag` to remove the pre-release.
+
+Full procedure documented in `docs/guides/homebrew-tap.md` § Epic-Close Finalization.
