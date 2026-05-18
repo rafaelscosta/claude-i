@@ -53,3 +53,6 @@ coverage.xml
 # claude-i runtime artifacts
 /tmp/claude-i-*
 *.sentinel
+
+# AIOX framework learning logs (cross-repo SDC artifacts)
+.aiox/
