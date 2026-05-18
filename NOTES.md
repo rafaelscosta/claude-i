@@ -73,3 +73,24 @@ event" → DEFER** branch. AC-5's fallback clause covers it.
 Until then, the shell guard inside `HOOK_CMD`
 (`if [ -n "$CLAUDE_I_SENTINEL" ]; then ...; fi`) is the sole and
 sufficient isolation mechanism for the claude-i Stop hook.
+
+
+## v0.2.0 Release Tag — Deferred to Epic Close
+
+STORY-001.3 bumped the package to `0.2.0` (no `.dev0` suffix) but does
+NOT push a `v0.2.0` git tag. The tag is deliberately deferred to the
+final closure of EPIC-001 (after STORY-001.5 lands).
+
+Rationale: a tag-triggered PyPI publish workflow is a one-shot event —
+the same tag cannot fire it twice. STORY-001.4 (Homebrew formula,
+install.sh, 3-OS smoke CI) and STORY-001.5 (doctor/uninstall/reap
+subcommands, --output-format json, readiness polling, G14/G17 tests)
+will land on `main` between now and release without bumping the version
+again. The `v0.2.0` tag is created and pushed in ONE atomic operation
+at the end of the epic, with a clean release notes pointing at the
+final `main` SHA.
+
+Publish workflow (`.github/workflows/publish.yml`) is `workflow_dispatch`
+only for now — manual `gh workflow run publish.yml` after the tag lands.
+This gives the operator a human gate without GitHub Environments
+ceremony.
