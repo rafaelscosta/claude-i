@@ -529,6 +529,75 @@ def test_stale_sentinels_age_filter(
     assert recent not in stale
 
 
+# ---------------------------------------------------------------------------
+# STORY-001.5 / Task 6.3 / Q-3 — cmd_reap wiring tests
+# ---------------------------------------------------------------------------
+
+
+def test_reap_subcommand_calls_reap_orphans(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``claude-i reap`` delegates to ``reaper.reap_orphans()`` exactly once.
+
+    Verifies the IDS-compliant wiring (resolves @po C-1): ``cmd_reap`` does
+    NOT re-implement orphan detection; it calls the existing
+    ``reap_orphans`` from STORY-001.2. Also confirms the doctor-style
+    subcommand path bypasses ``deps.check_deps`` / ``hook.ensure_hook``
+    (a reap should work even when the env is partially broken).
+    """
+    # tmux must look installed so the CONFIG_ERROR shortcut in cmd_reap does
+    # not preempt the call to reap_orphans.
+    monkeypatch.setattr(
+        cli.shutil,
+        "which",
+        lambda name: "/usr/bin/tmux" if name == "tmux" else None,
+    )
+
+    with (
+        patch.object(cli.deps, "check_deps") as cd,
+        patch.object(cli.hook, "ensure_hook") as eh,
+        patch.object(cli.reaper, "reap_orphans", return_value=3) as reap_mock,
+        patch("sys.argv", ["claude-i", "reap"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+    # Exit 0 because reap_orphans succeeded; output reports the count.
+    assert exc.value.code == 0
+    reap_mock.assert_called_once_with()
+    out = capsys.readouterr().out
+    assert "reaped 3 orphan" in out
+    # Subcommand path skips the pre-run dep/hook checks.
+    cd.assert_not_called()
+    eh.assert_not_called()
+
+
+def test_reap_subcommand_zero_count_exits_0(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``claude-i reap`` exits 0 with a no-op message when no orphans exist.
+
+    AC-4: count == 0 is still success. Operator-facing message must be
+    distinct from the count-positive case so scripts can grep for either.
+    """
+    monkeypatch.setattr(
+        cli.shutil,
+        "which",
+        lambda name: "/usr/bin/tmux" if name == "tmux" else None,
+    )
+
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(cli.reaper, "reap_orphans", return_value=0),
+        patch("sys.argv", ["claude-i", "reap"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+    assert exc.value.code == 0, "zero orphans must still exit 0 (no-op success)"
+    out = capsys.readouterr().out
+    assert "no orphaned sessions found" in out
+
+
 # Local import so the helper above can use it. Placed at end to avoid the
 # isort/E402 conflict with the module-level imports.
 import time  # noqa: E402

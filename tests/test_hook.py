@@ -298,3 +298,117 @@ def test_install_hook_preserves_existing_hooks_with_lock(
     # Both entries survive — same assertion as test_install_hook_preserves_existing_hooks.
     stop_list = cfg["hooks"]["Stop"]
     assert len(stop_list) == 2
+
+
+# STORY-001.5 / Task 6.2 / Q-1 + Q-2 — remove_hook() unit tests.
+
+
+def test_remove_hook_removes_only_claude_i_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``remove_hook`` drops claude-i leaves and preserves foreign hooks.
+
+    Setup: settings.json with a claude-i Stop hook AND a foreign http Stop
+    hook from another tool. Expected: after ``remove_hook()`` returns,
+    the foreign http entry survives byte-identical and the claude-i entry
+    is gone. Return value is the count of removed leaves (1).
+    """
+    target = _redirect_settings(tmp_path, monkeypatch)
+    pre_existing = {
+        "hooks": {
+            "Stop": [
+                {
+                    "hooks": [
+                        {
+                            "type": "http",
+                            "url": "http://localhost:7483/hooks/stop",
+                            "timeout": 5,
+                        }
+                    ]
+                },
+                {
+                    "hooks": [
+                        {"type": "command", "command": settings.HOOK_CMD}
+                    ]
+                },
+            ]
+        }
+    }
+    target.write_text(json.dumps(pre_existing))
+
+    removed = hook.remove_hook()
+    assert removed == 1, f"expected 1 claude-i leaf removed; got {removed}"
+
+    cfg = json.loads(target.read_text())
+    stop_list = cfg["hooks"]["Stop"]
+    # Foreign http hook must survive verbatim.
+    http_entries = [
+        leaf
+        for group in stop_list
+        for leaf in group.get("hooks", [])
+        if isinstance(leaf, dict) and leaf.get("type") == "http"
+    ]
+    assert len(http_entries) == 1
+    assert http_entries[0]["url"] == "http://localhost:7483/hooks/stop"
+    # No claude-i command entries should remain.
+    claude_entries = [
+        leaf
+        for group in stop_list
+        for leaf in group.get("hooks", [])
+        if isinstance(leaf, dict)
+        and leaf.get("type") == "command"
+        and leaf.get("command") == settings.HOOK_CMD
+    ]
+    assert claude_entries == [], (
+        "remove_hook left a claude-i entry behind"
+    )
+
+
+def test_remove_hook_noop_when_not_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``remove_hook`` returns 0 without raising when no hook is installed.
+
+    Covers two no-op shapes:
+    1. settings.json does not exist (returns 0 immediately, no lock acquired).
+    2. settings.json exists but has no Stop hooks (returns 0, file untouched).
+    """
+    target = _redirect_settings(tmp_path, monkeypatch)
+
+    # Shape 1: file absent.
+    assert not target.exists()
+    assert hook.remove_hook() == 0
+
+    # Shape 2: file present, no Stop hooks at all.
+    target.write_text(json.dumps({"hooks": {}}))
+    assert hook.remove_hook() == 0
+    # File content must remain valid JSON with the original shape — we never
+    # rewrite when removed == 0.
+    cfg = json.loads(target.read_text())
+    assert cfg == {"hooks": {}}
+
+
+# STORY-001.5 / Task 6.7 / Q-1 (G14) — deferral marker test (AC-8 G14 portion).
+
+
+def test_subagent_stop_deferred() -> None:
+    """G14 deferral is documented in NOTES.md (AC-8 acknowledgement).
+
+    AC-8 requires tests cover G14. The G14 investigation (Task 6.7) concluded
+    that no distinct ``SubagentStop`` event is currently observable in
+    claude-code 2.1.143's hook payload, so the implementation was deferred
+    with a structured record in ``NOTES.md``. This test pins that record:
+    if someone later removes the deferral section without implementing G14
+    handling, this assertion fires and re-opens the gap.
+    """
+    notes_path = Path(__file__).parent.parent / "NOTES.md"
+    assert notes_path.exists(), "NOTES.md is the G14 deferral record"
+    content = notes_path.read_text()
+    # Section header pins the deferral location (renames/reorgs trip this).
+    assert "STORY-001.5 — G14 SubagentStop Deferred" in content, (
+        "G14 deferral section header missing from NOTES.md"
+    )
+    # Keyword presence: SubagentStop is the deferred event name; DEFERRED is
+    # the canonical status label used in NOTES.md headers.
+    assert "SubagentStop" in content
+    assert "DEFERRED" in content
