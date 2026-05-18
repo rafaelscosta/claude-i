@@ -234,6 +234,94 @@ def test_non_empty_response_exits_0(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# STORY-001.5 / Task 6.4 — --output-format json (AC-5)
+# ---------------------------------------------------------------------------
+
+
+def test_output_format_json_structure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--output-format json`` emits the AC-5 envelope to stdout.
+
+    Contract: ``{"text": "...", "cost_usd": null|float, "tokens_in": null|int,
+    "tokens_out": null|int, "duration_ms": int}``.
+    """
+    import json as _json
+    full_metadata = {
+        "duration_ms": 1234,
+        "cost_usd": 0.0042,
+        "tokens_in": 100,
+        "tokens_out": 50,
+    }
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(
+            cli.runner, "run", return_value=("hello world", full_metadata)
+        ),
+        patch("sys.argv", ["claude-i", "--output-format", "json", "hello"]),
+    ):
+        cli.main()
+    out = capsys.readouterr().out.strip()
+    parsed = _json.loads(out)
+    assert parsed == {
+        "text": "hello world",
+        "cost_usd": 0.0042,
+        "tokens_in": 100,
+        "tokens_out": 50,
+        "duration_ms": 1234,
+    }
+
+
+def test_output_format_json_null_fields_when_absent(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON envelope tolerates ``None`` for cost/token fields.
+
+    The Stop hook payload from older ``claude`` versions does not surface
+    cost/token metrics; we serialize them as JSON ``null`` so consumers can
+    distinguish "not reported" from "zero usage".
+    """
+    import json as _json
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(
+            cli.runner, "run", return_value=("hi", _DEFAULT_METADATA)
+        ),
+        patch("sys.argv", ["claude-i", "--output-format", "json", "prompt"]),
+    ):
+        cli.main()
+    parsed = _json.loads(capsys.readouterr().out.strip())
+    assert parsed["text"] == "hi"
+    assert parsed["cost_usd"] is None
+    assert parsed["tokens_in"] is None
+    assert parsed["tokens_out"] is None
+    assert parsed["duration_ms"] == 42
+
+
+def test_output_format_text_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--output-format`` defaults to ``text`` (verbatim print). Regression
+    guard so existing pipelines see no behavior change without the flag."""
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(
+            cli.runner, "run", return_value=("plain text", _DEFAULT_METADATA)
+        ),
+        patch("sys.argv", ["claude-i", "hello"]),
+    ):
+        cli.main()
+    out = capsys.readouterr().out
+    # In text mode the output is just the response text + a trailing newline
+    # from print() — NOT a JSON object.
+    assert out.strip() == "plain text"
+    assert "{" not in out  # rules out a JSON serialization slip-through
+
+
+# ---------------------------------------------------------------------------
 # STORY-001.5 / Task 6.1 — doctor subcommand
 # ---------------------------------------------------------------------------
 
