@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 authors = [
     { name = "rafaelscosta" },
 ]
-keywords = ["claude", "cli", "tmux", "automation"]
+keywords = ["claude", "ai", "cli", "tmux", "automation"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -34,6 +34,8 @@ dev = [
     "pytest>=7.0",
     "ruff>=0.4.0",
     "mypy>=1.8",
+    "build>=1.0",
+    "twine>=5.0",
 ]
 
 [project.scripts]
@@ -43,6 +45,7 @@ claude-i = "claude_i.cli:main"
 Homepage = "https://github.com/rafaelscosta/claude-i"
 Repository = "https://github.com/rafaelscosta/claude-i"
 Issues = "https://github.com/rafaelscosta/claude-i/issues"
+"Bug Tracker" = "https://github.com/rafaelscosta/claude-i/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/claude_i"]
