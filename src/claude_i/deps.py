@@ -24,7 +24,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from claude_i.exit_codes import CONFIG_ERROR
+from claude_i.exit_codes import CONFIG_ERROR, PLATFORM_ERROR
 
 # External binaries that claude-i shells out to. The full list is the source
 # of truth for ``check_deps``.
@@ -103,11 +103,17 @@ def _claude_install_hint() -> str:
 def check_deps() -> None:
     """Verify that every binary in ``EXPECTED_BINARIES`` is on ``$PATH``.
 
-    Exits with code ``2`` (POSIX: misuse of shell command / config error) and
-    prints an OS-specific install hint to stderr when a binary is missing.
-    Order matters: ``tmux`` is checked first because the install hint for it
-    requires OS detection, whereas the ``claude`` hint is a single URL.
+    Exits with ``CONFIG_ERROR`` (2) and prints an OS-specific install hint to
+    stderr when a binary is missing. Order matters:
+
+    - G9 — ``assert_not_windows()`` runs FIRST. On native Windows we exit
+      with ``PLATFORM_ERROR`` (3) before probing for tmux/claude, since
+      neither binary is available there.
+    - ``tmux`` next — its install hint requires OS detection (apt / dnf /
+      brew), so checking it before ``claude`` (single URL hint) keeps the
+      decision tree shallow.
     """
+    assert_not_windows()
     if shutil.which("tmux") is None:
         print(f"claude-i: tmux not found on PATH. {_tmux_install_hint()}", file=sys.stderr)
         sys.exit(CONFIG_ERROR)
@@ -122,12 +128,18 @@ def check_deps() -> None:
 def assert_not_windows() -> None:
     """Exit with a WSL2 hint when running on native Windows.
 
-    Stub — STORY-001.2 implements the full platform guard (gap G9). For now
-    this is a no-op everywhere; the function exists so downstream modules
-    can import a stable symbol.
+    STORY-001.2 / Task 3.6 / Gap G9 — full implementation. ``sys.platform``
+    on native Windows is the literal ``"win32"``. WSL2 reports ``"linux"``,
+    so the strict equality check correctly allows WSL2 through.
+
+    Exits with ``PLATFORM_ERROR`` (3), distinct from runtime/config errors,
+    so monitoring tools can recognize "claude-i declined to run here"
+    versus "claude-i ran and failed". The message is verbatim per AC-5.
     """
-    if sys.platform.startswith("win"):
-        sys.exit(
-            "claude-i does not support native Windows in v0.2.0. "
-            "Use WSL2 (Ubuntu) instead."
+    if sys.platform == "win32":
+        print(
+            "claude-i requires Linux or macOS. On Windows, use WSL2: "
+            "https://docs.microsoft.com/windows/wsl/",
+            file=sys.stderr,
         )
+        sys.exit(PLATFORM_ERROR)

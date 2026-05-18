@@ -102,3 +102,70 @@ def test_tmux_hint_no_os_release(tmp_path: Any, monkeypatch: pytest.MonkeyPatch)
     with patch.object(deps.platform, "system", return_value="Linux"):
         hint = deps._tmux_install_hint()
     assert "package manager" in hint
+
+
+# STORY-001.2 / Task 3.6 / Gap G9 — Windows platform guard.
+
+
+def test_windows_guard_exits_3(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On native Windows (``sys.platform == "win32"``), exit with code 3.
+
+    The seed's stub used ``startswith("win")``, exited with code 1, and
+    had the wrong message. G9 fixes all three: strict equality to
+    ``"win32"``, exit code 3 (PLATFORM_ERROR), and the AC-5 verbatim
+    message including the WSL2 docs URL.
+    """
+    monkeypatch.setattr(deps.sys, "platform", "win32")
+    with pytest.raises(SystemExit) as exc:
+        deps.assert_not_windows()
+    assert exc.value.code == 3, (
+        f"native Windows must exit PLATFORM_ERROR (3); got {exc.value.code}"
+    )
+    err = capsys.readouterr().err
+    assert "requires Linux or macOS" in err
+    assert "WSL2" in err
+    assert "https://docs.microsoft.com/windows/wsl/" in err
+
+
+def test_windows_guard_allows_wsl2(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WSL2 reports ``sys.platform == "linux"`` — must NOT trigger the guard."""
+    monkeypatch.setattr(deps.sys, "platform", "linux")
+    # Must not raise.
+    deps.assert_not_windows()
+
+
+def test_windows_guard_allows_darwin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """macOS (``darwin``) passes the guard."""
+    monkeypatch.setattr(deps.sys, "platform", "darwin")
+    deps.assert_not_windows()
+
+
+def test_check_deps_runs_windows_guard_first(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``check_deps`` calls ``assert_not_windows`` BEFORE the shutil.which probes.
+
+    Stubs ``sys.platform = "win32"`` and asserts:
+    1. ``shutil.which`` was never called (guard short-circuited).
+    2. Exit code is 3 (PLATFORM_ERROR), not 2 (CONFIG_ERROR).
+    """
+    monkeypatch.setattr(deps.sys, "platform", "win32")
+    which_calls: list[str] = []
+
+    def fake_which(name: str) -> None:
+        which_calls.append(name)
+        return None
+
+    monkeypatch.setattr(deps.shutil, "which", fake_which)
+
+    with pytest.raises(SystemExit) as exc:
+        deps.check_deps()
+    assert exc.value.code == 3, (
+        "Windows guard must fire BEFORE shutil.which checks"
+    )
+    assert which_calls == [], (
+        f"shutil.which must not be called on Windows; got: {which_calls}"
+    )
+    assert "WSL2" in capsys.readouterr().err
