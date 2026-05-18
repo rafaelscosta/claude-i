@@ -1,0 +1,166 @@
+# Multi-OS Install Smoke Matrix — STORY-001.4
+#
+# Validates that `install.sh` produces a working `claude-i --version` on:
+#   - macOS-latest (Darwin path)
+#   - Ubuntu-latest (apt + pipx path)
+#   - Fedora:latest container (dnf + pipx path)
+#
+# Strategy: each job builds the sdist locally first, then invokes
+# `install.sh --local dist/claude_i-0.2.0.tar.gz`. This avoids the
+# chicken-and-egg problem of "install.sh references PyPI but PyPI doesn't
+# have v0.2.0 until epic close" (NOTES.md). After epic close + PyPI publish,
+# a follow-up CI hardening can drop `--local` and exercise the PyPI path.
+#
+# AC coverage: AC-3, AC-4, AC-5, AC-6, AC-9, AC-10.
+
+name: smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "install.sh"
+      - ".github/workflows/smoke.yml"
+      - "pyproject.toml"
+      - "src/claude_i/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "install.sh"
+      - ".github/workflows/smoke.yml"
+      - "pyproject.toml"
+      - "src/claude_i/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: shellcheck install.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -q && sudo apt-get install -y shellcheck
+      - name: Lint install.sh
+        run: shellcheck -x install.sh
+
+  dry-run:
+    name: install.sh --dry-run sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke --dry-run (no installs performed)
+        run: bash install.sh --dry-run
+      - name: Smoke --check on a machine without claude-i (expect exit 2)
+        run: |
+          set +e
+          bash install.sh --check
+          rc=$?
+          set -e
+          if [ "$rc" -ne 2 ]; then
+            echo "Expected --check to exit 2 on clean machine, got $rc"
+            exit 1
+          fi
+          echo "OK: --check exited 2 as expected on clean machine"
+
+  smoke-macos:
+    name: smoke (macos-latest, install.sh --local)
+    runs-on: macos-latest
+    # macOS smoke uses install.sh's local-path mode. The Homebrew tap-based path
+    # (AC-1) is validated manually at epic close per AC-8 — see docs/guides/homebrew-tap.md.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --sdist
+          ls -la dist/
+
+      - name: Install via install.sh --local
+        run: bash install.sh --local dist/claude_i-0.2.0.tar.gz
+
+      - name: Verify claude-i is reachable
+        run: |
+          # AC-9: verify via explicit ~/.local/bin path first, then PATH.
+          if [ -x "$HOME/.local/bin/claude-i" ]; then
+            out="$("$HOME/.local/bin/claude-i" --version)"
+          else
+            out="$(claude-i --version)"
+          fi
+          echo "claude-i --version => $out"
+          test "$out" = "claude-i 0.2.0"
+
+  smoke-ubuntu:
+    name: smoke (ubuntu-latest, install.sh --local)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --sdist
+          ls -la dist/
+
+      - name: Install via install.sh --local
+        run: bash install.sh --local dist/claude_i-0.2.0.tar.gz
+
+      - name: Verify claude-i is reachable
+        run: |
+          if [ -x "$HOME/.local/bin/claude-i" ]; then
+            out="$("$HOME/.local/bin/claude-i" --version)"
+          else
+            out="$(claude-i --version)"
+          fi
+          echo "claude-i --version => $out"
+          test "$out" = "claude-i 0.2.0"
+
+  smoke-fedora:
+    name: smoke (fedora:latest container, install.sh --local)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build prereqs (Fedora)
+        # Fedora minimal image lacks tar, git, gcc, python3-pip; pull them in
+        # so actions/checkout, python -m build, and bash all work.
+        run: |
+          dnf install -y python3 python3-pip tar gzip git findutils which sudo
+
+      - name: Build sdist
+        run: |
+          python3 -m pip install --upgrade pip build
+          python3 -m build --sdist
+          ls -la dist/
+
+      - name: Install via install.sh --local
+        # The Fedora container does not have a default sudo user. install.sh
+        # uses sudo to install tmux + pipx; in this container, running as root
+        # bypasses sudo (sudo defaults to passing through when run as root, or
+        # we install sudo above so the no-op variant works).
+        run: bash install.sh --local dist/claude_i-0.2.0.tar.gz
+
+      - name: Verify claude-i is reachable
+        run: |
+          if [ -x "$HOME/.local/bin/claude-i" ]; then
+            out="$("$HOME/.local/bin/claude-i" --version)"
+          else
+            out="$(claude-i --version)"
+          fi
+          echo "claude-i --version => $out"
+          test "$out" = "claude-i 0.2.0"
