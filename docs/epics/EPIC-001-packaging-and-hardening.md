@@ -5,7 +5,7 @@
 | **ID** | EPIC-001 |
 | **Title** | Packaging and Hardening for `claude-i` |
 | **Status** | In Progress |
-| **Progress** | 2/6 stories Done (33.3%) |
+| **Progress** | 3/6 stories Done (50.0%) |
 | **Owner** | @pm (Morgan) |
 | **Created** | 2026-05-17 |
 | **Repository** | rafaelscosta/claude-i (private) |
@@ -96,7 +96,7 @@ The 18 gaps from prior analysis, mapped to the stories that close them:
 |---|---|---|---|---|---|
 | STORY-001.0 | Bootstrap: package skeleton, pyproject, CI, pytest, seed refactor | **Done** | — | G18 (scaffold) | 5 pts (~2 days) |
 | STORY-001.1 | Critical hardening: permission-mode, hook scoping, dep check, env var hygiene | **Done** | STORY-001.0 ✓ | G1, G3, G4, G12 (partial) — G2 deferred with NOTES | 5 pts (~2 days) |
-| STORY-001.2 | Important hardening: tempfile, reaper, flock, exit codes, platform guard, encoding | Draft | STORY-001.0 ✓, STORY-001.1 | G5, G6, G7, G8, G9, G13 | 5 pts (~2 days) |
+| STORY-001.2 | Important hardening: tempfile, reaper, flock, exit codes, platform guard, encoding | **Done** | STORY-001.0 ✓, STORY-001.1 ✓ | G5, G6, G7, G8, G9, G13 | 5 pts (~2 days) |
 | STORY-001.3 | PyPI packaging: build, publish (OIDC), `pipx` + `uv tool` validation, `--version` | Draft | STORY-001.0 ✓, STORY-001.1, STORY-001.2 | — (distribution) | 3 pts (~1 day) |
 | STORY-001.4 | Multi-target install: Homebrew tap, `install.sh`, OS matrix smoke tests | Draft | STORY-001.3 | — (distribution) | 5 pts (~2 days) |
 | STORY-001.5 | UX & operations: `doctor`, `uninstall`, `reap`, JSON output, streaming, polling, residual gap tests | Draft | STORY-001.1, STORY-001.2 | G10, G11, G12, G14, G15, G16, G17 | 5 pts (~2 days) |
@@ -216,6 +216,7 @@ Confidence on estimate: **MEDIA** — calibrated against typical Python CLI pack
 | 2026-05-17 | 0.1 | Initial Epic draft from gap analysis + scope decision (full packaging + hardening) | @pm (Morgan) |
 | 2026-05-17 | 0.2 | STORY-001.0 closed → Done. Epic status Draft → **In Progress**. Progress: 1/6 (16.7%). QA PASS 96/100. CI run #26010042733 GREEN. Velocity baseline established: 5 pts / same-day delivery. Next: STORY-001.1 (G1-G4 + G12 partial) ready for @sm draft refinement → @po validation → @dev execution. | @po (Pax) |
 | 2026-05-17 | 0.3 | **STORY-001.1 closed → Done.** Progress: 1/6 → **2/6 (33.3%)**. QA PASS 94/100. CI run #26011076243 GREEN (3 jobs). G1+G3+G4 implemented; G2 deferred-with-notes (matcher field undocumented for `Stop` events — NOTES.md cites 4 authority sources; AC-5 fallback branch is operative path; structural `hook_installed()` check is forward-compatible). G12 partial landed (structural hook check). 5 commits on `origin/main` (4 atomic per-gap + status + gate file). Velocity: 5 pts same-day delivery (matches 001.0 baseline). Next: **STORY-001.2** (G5/G6/G7/G8/G9/G13 — important hardening) ready for refinement; deps met (001.0 ✓, 001.1 ✓). | @po (Pax) |
+| 2026-05-18 | 0.4 | **STORY-001.2 closed → Done.** Progress: 2/6 → **3/6 (50.0%)**. QA PASS 95/100. CI run #26012342162 GREEN (3 jobs). G5+G6+G7+G8+G9+G13 all implemented. 8 atomic commits on `origin/main` (6 per-gap + 1 test consolidation + 1 docs/gate). HEAD `26bb711`. G4 contract from 001.1 preserved verbatim across all `runner.py` edits (test pair `test_sentinel_stripped_from_subprocess_env` + `test_sentinel_still_in_sh_command` passes). `assert_not_windows()` stub REPLACED (single definition in `deps.py:128`). All 4 AC-7 parse-failure branches landed (3 RuntimeError + 1 explicit empty-string return). New `exit_codes` module is source of truth for 001.5. 68/68 pytest in fresh Python 3.14.3 venv, ruff clean (S306 active), mypy strict clean. CHK-8/9/10 N/A (`deploy_type: none`, no AIOX governance surface in claude-i). Velocity: 5 pts same-day delivery (matches 001.0/001.1 baseline). Forward-compat carryovers to 001.5: G14 (SubagentStop discovery) + G17 (readiness polling) + `exit_codes` reuse. Next: **STORY-001.3** (PyPI packaging — build, OIDC publish, `pipx`/`uv tool` validation, `--version`); deps met (001.0 ✓, 001.1 ✓, 001.2 ✓). | @po (Pax) |
 
 ---
 
@@ -293,4 +294,42 @@ Confidence on estimate: **MEDIA** — calibrated against typical Python CLI pack
 
 ---
 
-*Epic v0.3 | Status: In Progress (2/6 Done, 33.3%) | Next step: STORY-001.2 — Important hardening (G5/G6/G7/G8/G9/G13)*
+### Story 001.2 — Important Hardening: mkstemp, Reaper/atexit, flock, Exit Codes, Windows Guard, Encoding (2026-05-18)
+
+**Built:**
+- `src/claude_i/exit_codes.py` (NEW) — `SUCCESS = 0`, `RUNTIME_ERROR = 1`, `CONFIG_ERROR = 2`, `PLATFORM_ERROR = 3` as `Final[int]` constants. Placed in package (not in `cli.py`) per @architect rationale to avoid circular import. Source of truth for 001.5 (`doctor` / `uninstall` / `reap` subcommands).
+- `src/claude_i/reaper.py` — full G6 implementation: `register_cleanup(session)` + `_atexit_handler()` + `_sigterm_handler()` + module-level `_session_to_cleanup` state. `atexit.register` is idempotent (registered once). `signal.signal(SIGTERM, ...)` ensures atexit fires on SIGTERM. Also includes `reap_orphans()` + `_pid_alive()` helpers for 001.5.
+- `src/claude_i/runner.py` — G5 (mkstemp + `os.close(fd)`); G6 (`reaper.register_cleanup(session)` wired immediately after `tmux("new-session", ...)`); G8/AC-7 (4-branch refactor: 3 RuntimeError + 1 explicit `return ""`); G13 (UTF-8 encoding for tmux IPC + best-effort `prompt.encode("utf-8")` pre-check). G4 contract from 001.1 preserved verbatim.
+- `src/claude_i/hook.py` — G7 (`fcntl.flock` on `claude-i.lock` sibling file, `LOCK_EX | LOCK_NB` with deadline-based retry, 5s timeout → `RUNTIME_ERROR`). Wraps only `install_hook()` write path; `hook_installed()` read-only path untouched (G2 deferral from 001.1 preserved). String-form `sys.exit` at lines 93/119 migrated to `CONFIG_ERROR` / `RUNTIME_ERROR` (line 93 semantic correction 1→2 documented as intended).
+- `src/claude_i/deps.py` — G9: REPLACED `assert_not_windows()` stub (single definition at line 128). Strict `sys.platform == "win32"` check (WSL2 reports `"linux"`, correctly bypasses). Verbatim AC-5 message text. `sys.exit(PLATFORM_ERROR)`. Called as first action in `check_deps()`. Existing `sys.exit(2)` calls at lines 111/117 migrated to `CONFIG_ERROR` constant.
+- `src/claude_i/cli.py` — `--allow-empty` flag; `ExitCode` import; try/except wraps `runner.run()` to catch `RuntimeError` and `TimeoutError` → exit 1. `--help` epilog extended to 4 codes (0/1/2/3). SIGKILL best-effort note added per AC-2.
+- `tests/test_reaper.py` (NEW) — atexit + SIGTERM cleanup + `reap_orphans` tests.
+- `tests/test_runner.py`, `test_hook.py`, `test_deps.py`, `test_cli.py` — EXTENDED. 30 → 68 tests (38 new for 001.2).
+- `pyproject.toml` — added ruff `S306` (suspicious-mktemp-usage) to `[tool.ruff.lint.select]` — actively prevents mktemp regression (verified to flag on test reintroduction).
+
+**Patterns established:**
+- **`exit_codes` as separate module, not in `cli.py`**: avoids circular import when downstream modules (`deps.py`, `hook.py`, `runner.py`, `reaper.py`) need to consume exit codes. Future stories adding subcommands should import from `claude_i.exit_codes`, not redefine.
+- **String-form `sys.exit(message)` is an antipattern**: it exits with code 1 implicitly. Always use `print(message, file=sys.stderr); sys.exit(EXIT_CODE_CONSTANT)`. Migration applied at 4 call sites in this story.
+- **G4 two-layer contract (delivery via shell prefix + isolation via env strip) survives refactoring**: 4 runner.py edits in this story (G5 + G6 + G8 + G13) and the test pair still passes. The contract is genuinely load-bearing; future stories touching `runner.py` must keep both layers.
+- **AC-7 four-branch parse-failure pattern**: `runner.run()` must distinguish (1) verified-empty assistant turn (return `""`) from (2) no-assistant-message (RuntimeError) from (3) payload-missing (RuntimeError) from (4) transcript-missing (RuntimeError). `cli.py` catches RuntimeError → exit 1; empty string → exit 0 only with `--allow-empty`. Fake-success returns are eliminated — no more strings that print like success but signal failure.
+- **`fcntl.flock` deadline-based retry (5s, 100ms sleep)**: better than blocking acquire because it gives a deterministic timeout with a useful error message. Pattern reusable for any future file-locking need.
+- **`atexit` + `SIGTERM` handler is belt-and-braces with existing `finally` cleanup**: triple coverage (normal exit + KeyboardInterrupt + SIGTERM via signal handler → sys.exit → atexit). SIGKILL still uncoverable (documented in `--help`).
+- **Stub-vs-replace discipline**: when an earlier story leaves a stub function (`reaper.register_cleanup`, `deps.assert_not_windows`), the later story REPLACES the body and verifies single definition via `grep -n "def <name>"`. Never add a duplicate function.
+
+**Key decisions:**
+1. **G8 — `exit_codes.py` separate module, not constants in `cli.py`**: avoids circular import when `deps.py`/`hook.py`/`runner.py`/`reaper.py` all need to consume exit codes. `cli.py` would have been imported by every module → circular. Module docstring documents rationale.
+2. **G7 — lock file sibling (`claude-i.lock`), not lock on `settings.json` directly**: safer because Claude Code itself writes to `settings.json` and `claude-i`'s `fcntl.flock` is advisory (does not prevent Claude Code's own writes). Lock file is exclusive to `claude-i` invocations.
+3. **G8 — RuntimeError uniformly across 4 branches, `cli.py` catches and routes to exit 1**: chosen over per-branch exit-code differentiation because the operator just needs to know "claude-i failed" with a descriptive message; finer-grained codes are 001.5's `doctor` subcommand domain.
+4. **G9 — strict `sys.platform == "win32"`, not `startswith("win")`**: WSL2 reports `"linux"`, so the strict check correctly allows WSL2 while blocking native Windows. The current stub (from 001.0) used `startswith("win")` which had the same effect but is less precise.
+5. **G13 — best-effort encoding (warn-and-continue), not fail-hard**: a user with an ASCII locale running a Unicode prompt should not have `claude-i` crash; the warning surfaces the issue without blocking work. AC-6 mandates this behavior.
+6. **CodeRabbit SKIPPED per operator instruction**: ("Skip CodeRabbit. Re-run gates independently in fresh venv."). Compensating gates: ruff + mypy strict + pytest in a fresh Python 3.14.3 venv. All independent gates green.
+
+**Tech debt identified:**
+- **NOTES.md G14/G17 carryover documentation** (LOW): currently only in this story's Dev Agent Record + Closure. 001.1 convention puts deferrals in NOTES.md. Suggested owner: @dev, pick up at start of 001.5.
+- **`reaper.py:74` bare `sys.exit(1)` in `_sigterm_handler`** (LOW, cosmetic): should be `sys.exit(RUNTIME_ERROR)` for consistency with G8 convention. Functionally identical. Suggested owner: @dev, migrate during 001.5 reap-subcommand work.
+
+**Tests:** 68 / 68 pass (30 pre-existing regression intact + 38 new for 001.2). 5.4 tests per AC avg. **Deploy:** N/A (`deploy_type: none`). **CodeRabbit:** 0 iter (skipped per operator; compensating gates green in fresh venv).
+
+---
+
+*Epic v0.4 | Status: In Progress (3/6 Done, 50.0%) | Next step: STORY-001.3 — PyPI packaging (build, OIDC publish, `pipx`/`uv tool` validation, `--version`)*
