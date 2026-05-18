@@ -156,3 +156,82 @@ of 2026-05-18 (`claude-code` CLI 2.1.x).
 
 Reference: STORY-001.5 Task 6.7 (deferred), AC-8 (G14 tests acknowledge
 deferral via `tests/test_hook.py::test_subagent_stop_deferred` marker).
+
+
+## Private Distribution Phase (2026-05-18)
+
+**Status:** `claude-i` repo remains PRIVATE post-`v0.2.0`. The canonical install
+asset for collaborators with read access is the GitHub Release v0.2.0:
+https://github.com/rafaelscosta/claude-i/releases/tag/v0.2.0
+
+### Active install paths (private repo)
+
+1. `pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.0`
+   (requires `gh auth login` or `GH_TOKEN`/`GITHUB_TOKEN` with `repo` scope)
+2. `gh release download v0.2.0 --pattern '*.whl' -R rafaelscosta/claude-i && pipx install ./claude_i-0.2.0-py3-none-any.whl`
+3. `gh release download v0.2.0 --pattern '*.tar.gz' -R rafaelscosta/claude-i && uv tool install ./claude_i-0.2.0.tar.gz`
+
+### Deferred (public-release paths)
+
+The following install surfaces are wired in code but inert until the repo
+flips public:
+
+- **PyPI** — `pipx install claude-i` / `uv tool install claude-i`. Blocked
+  on running `gh workflow run publish.yml --ref v0.2.0` against a public
+  repo with the `publish` GitHub Environment + PyPI Trusted Publisher
+  (`pending_publisher`) configured.
+- **Homebrew tap** — `brew install rafaelscosta/claude-i/claude-i`. Blocked
+  on STORY-001.4 Task 5.9 (canonical PyPI URL + SHA256 in
+  `Formula/claude-i.rb`). The current formula at
+  `rafaelscosta/homebrew-claude-i@main` points at a dev-pass URL
+  (`v0.2.0-pre` GitHub release) — works locally, NOT for strangers.
+- **One-line bootstrap** — `curl -fsSL .../install.sh | bash`. The
+  `raw.githubusercontent.com/rafaelscosta/claude-i/main/install.sh` URL
+  returns 404 to anonymous fetches while the repo is private.
+
+### Operator checklist — enable public release
+
+When the decision is made to go public, run these steps in order:
+
+1. **Flip repo visibility:** `gh repo edit rafaelscosta/claude-i --visibility public --accept-visibility-change-consequences`.
+   - Verify: `gh repo view rafaelscosta/claude-i --json visibility` → `"public"`.
+   - Once flipped, `raw.githubusercontent.com/.../install.sh` returns 200 to anonymous.
+2. **Configure PyPI Trusted Publisher (pending):**
+   - PyPI account → Account → Publishing → Add a pending publisher
+   - Project name: `claude-i`, Owner: `rafaelscosta`, Repo: `claude-i`,
+     Workflow: `publish.yml`, Environment: `publish`
+3. **Create GitHub Environment `publish`:**
+   - `gh api repos/rafaelscosta/claude-i/environments/publish --method PUT`
+   - Add required reviewer (yourself) for a manual approval gate.
+4. **Trigger PyPI publish:**
+   - `gh workflow run publish.yml --ref v0.2.0 -R rafaelscosta/claude-i`
+   - Approve the `publish` environment gate when prompted.
+   - Verify: `pip download claude-i==0.2.0 -d /tmp/pypi-verify --no-deps`
+5. **Capture canonical PyPI URL + SHA256:**
+   - `shasum -a 256 /tmp/pypi-verify/claude_i-0.2.0.tar.gz`
+   - Note `files.pythonhosted.org` URL from `pip download -v` output.
+6. **Update Homebrew formula** (STORY-001.4 Task 5.9):
+   - Edit `rafaelscosta/homebrew-claude-i:Formula/claude-i.rb` →
+     replace `url` + `sha256` with PyPI canonical values.
+   - `brew untap rafaelscosta/claude-i && brew tap rafaelscosta/claude-i`
+   - `brew install --force claude-i && brew test claude-i` on clean macOS.
+   - Commit + push tap.
+7. **Cleanup pre-release:**
+   - `gh release delete v0.2.0-pre --cleanup-tag -R rafaelscosta/claude-i`
+   - This removes the dev-pass artifact once the canonical PyPI URL is live.
+8. **Update homebrew-claude-i README** — remove "PENDING UPSTREAM PUBLICATION"
+   section, re-enable the simple `brew tap / brew install` matrix.
+9. **Update claude-i README** — collapse the "Private Repo" section back
+   into the public install matrix (Homebrew + pipx + uv + curl bootstrap).
+
+### v0.2.0 Release artifact checksums (canonical for this distribution phase)
+
+- `claude_i-0.2.0-py3-none-any.whl` — SHA256
+  `ee6a455efd90b279114eb460030d9c96ac83a0119b39621ae837b3c709268e10`
+- `claude_i-0.2.0.tar.gz` — SHA256
+  `28738be41964796c031f4b2927839e3282a890f906866385ead2279879ec4353`
+
+These match the wheel and sdist uploaded to the v0.2.0 GitHub Release.
+The sdist SHA also matches the `v0.2.0-pre` dev-pass artifact referenced
+in the homebrew-claude-i `Formula/claude-i.rb` `url` field (intentional —
+same tarball content).
