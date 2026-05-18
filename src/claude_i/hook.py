@@ -202,6 +202,73 @@ def install_hook() -> None:
         _release_lock(lock_handle)
 
 
+def remove_hook() -> int:
+    """Remove every claude-i Stop hook entry from ``SETTINGS``.
+
+    STORY-001.5 / Task 6.2 — paired with ``cli.cmd_uninstall``. Acquires the
+    same G7 flock as ``install_hook`` so concurrent invocations cannot race.
+
+    Filters every ``Stop`` hook group's ``hooks`` list by
+    ``_is_claude_i_hook_entry``: claude-i leaves are dropped, every other
+    leaf (including http hooks belonging to other tools, malformed entries,
+    or unrelated commands) survives verbatim. Empty groups (where claude-i
+    was the only leaf) are also dropped to keep ``settings.json`` tidy.
+
+    Returns the number of claude-i hook entries removed. ``0`` means the
+    hook was not installed (no-op success — same exit code, different
+    operator-facing message). Raises ``json.JSONDecodeError`` on malformed
+    settings; the caller (``cmd_uninstall``) translates to CONFIG_ERROR.
+    """
+    if not SETTINGS.exists():
+        # No file → no hook → no-op. Mirrors the seed's hook_installed()
+        # branch where absence is not an error.
+        return 0
+    lock_handle = _acquire_lock_with_retry()
+    try:
+        cfg = load_settings()  # may raise json.JSONDecodeError — caller handles
+        hooks_section = cfg.get("hooks", {})
+        if not isinstance(hooks_section, dict):
+            return 0
+        stop_groups = hooks_section.get("Stop", [])
+        if not isinstance(stop_groups, list):
+            return 0
+        removed = 0
+        new_groups: list[Any] = []
+        for group in stop_groups:
+            if not isinstance(group, dict):
+                # Preserve unknown group shapes verbatim — we own claude-i
+                # entries only.
+                new_groups.append(group)
+                continue
+            leaves = group.get("hooks", [])
+            if not isinstance(leaves, list):
+                new_groups.append(group)
+                continue
+            kept_leaves: list[Any] = []
+            for entry in leaves:
+                if isinstance(entry, dict) and _is_claude_i_hook_entry(entry):
+                    removed += 1
+                    continue
+                kept_leaves.append(entry)
+            if kept_leaves:
+                # Group still has live leaves → keep it with the new list.
+                new_group = dict(group)
+                new_group["hooks"] = kept_leaves
+                new_groups.append(new_group)
+            elif not leaves:
+                # Group was empty to begin with — preserve verbatim so we
+                # do not silently restructure an unrelated config shape.
+                new_groups.append(group)
+            # else: every leaf was a claude-i entry → drop the empty group.
+        hooks_section["Stop"] = new_groups
+        cfg["hooks"] = hooks_section
+        if removed:
+            write_settings(cfg)
+        return removed
+    finally:
+        _release_lock(lock_handle)
+
+
 def ensure_hook() -> None:
     """Prompt the user to install the Stop hook if it is missing.
 
