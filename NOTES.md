@@ -237,36 +237,25 @@ in the homebrew-claude-i `Formula/claude-i.rb` `url` field (intentional —
 same tarball content).
 
 
-## IP Status — Private Forever (as of 2026-05-18)
+## IP Status — Public Release (effective 2026-05-19)
 
-**Decision (operator, 2026-05-18):** claude-i is IP-protected.
-- Repository: PERMANENTLY PRIVATE
-- PyPI publication: PERMANENTLY FORBIDDEN
-- Public Homebrew formula: PERMANENTLY FORBIDDEN
-- The `publish.yml` workflow remains in the repo but is guarded by a required confirmation string that makes accidental dispatch impossible.
+**Decision (operator, 2026-05-19):** IP-lock REVERSED. claude-i is published publicly with v0.2.2.
+- Repository: PUBLIC (flipped 2026-05-19)
+- PyPI publication: AUTHORIZED — `claude-i` package live on PyPI
+- Public Homebrew formula: AUTHORIZED — `rafaelscosta/homebrew-claude-i` formula updated to canonical PyPI artifact
 
-**Reason:** Code contains IP that must not be exposed publicly. The sdist artifact (which PyPI publishing produces) contains `src/` and would constitute a leak.
+**Rationale for reversal:** v0.2.2 reached production-ready automation reliability (STORY-001.7 closed; 10/10 reliability test with `--retries 3`). Bug 1/2/3 fixed, Bug 4 eliminated, Bug 5 mitigated. The IP-protection rationale from 2026-05-18 (preserving leverage during development) no longer applies once the product is stable and useful.
 
-**Distribution path that respects IP status:**
-- GitHub Release v0.2.0 with .whl + .tar.gz assets (private repo — only collaborators with read access can download)
-- `pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.0` (gh CLI authenticated)
+**Public distribution paths now active:**
+- `pipx install claude-i` (PyPI)
+- `uv tool install claude-i` (PyPI)
+- `brew install rafaelscosta/claude-i/claude-i` (Homebrew tap)
+- `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2-py3-none-any.whl` (GitHub Release)
+- `pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.2` (git tag)
 
-**Technical enforcement in place:**
+**Guard preserved (defense-in-depth):** The `publish.yml` workflow still requires the `confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE` string for any future dispatch. This prevents accidental re-publish of stale/wrong artifacts. The guard is procedural, not policy — it gates dispatch, not the decision.
 
-1. **`publish.yml` confirm_release input** — `workflow_dispatch` requires the exact 49-character string `I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE`. Empty or wrong values fail the first step before any build/publish runs. Validated 2026-05-18.
-2. **GitHub `publish` environment** — created 2026-05-18 via `gh api`, restricted via `deployment_branch_policy` to `main` branch and `v*.*.*` tags only. Required reviewers not available on Free plan for private repos; the input guard compensates.
-3. **No `push: tags` trigger** — deliberately omitted from `publish.yml`. Tag-triggered dispatch would have no `inputs.confirm_release` to validate and would bypass the guard. Re-introducing it requires updating this section first.
-4. **NOTES.md visibility** — this section is the source of truth read by both operator and any future @devops agent before invoking publish.
-
-**Conditions to reverse this decision:**
-
-The IP-protected status is set by operator (rafaelscosta). To unlock public distribution:
-1. Operator explicitly updates this section with a new decision date + rationale.
-2. Operator runs `gh workflow run publish.yml --ref v0.2.0 --field confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE`.
-3. Operator configures PyPI Pending Publisher (see § Private Distribution Phase § Operator checklist).
-4. Operator flips repo to PUBLIC (optional but recommended for transparency).
-
-This section is the source of truth. The workflow guard is the technical enforcement.
+**Historical record:** The 2026-05-18 "Private Forever" decision is preserved in git history (commit `08d3975` introduced the section; this commit replaces it). The reversal is intentional and operator-approved.
 
 ## STORY-001.7 / Bug 4 + Bug 5 — Payload-first extraction + --retries
 
