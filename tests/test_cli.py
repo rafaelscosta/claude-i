@@ -621,3 +621,107 @@ def test_stale_sentinels_uses_tempfile_gettempdir(
     assert old in stale, (
         f"doctor check (e) must read tempfile.gettempdir(); got stale={stale}"
     )
+
+
+# ---------------------------------------------------------------------------
+# STORY-001.7 / Bug 5 mitigation — --retries flag
+# ---------------------------------------------------------------------------
+
+
+def test_retries_default_is_single_shot() -> None:
+    """STORY-001.7 — default --retries is 0 (single-shot, backwards compat).
+
+    A RuntimeError from runner.run() must propagate to exit 1 on the very
+    first try when --retries is not passed. No retry banner on stderr.
+    """
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(
+            cli.runner, "run", side_effect=RuntimeError("simulated transcript missing")
+        ) as run_mock,
+        patch("sys.argv", ["claude-i", "hello"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+    assert exc.value.code == 1
+    assert run_mock.call_count == 1, (
+        f"default must single-shot; got {run_mock.call_count} calls"
+    )
+
+
+def test_retries_succeeds_after_one_transient_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--retries 2 absorbs one transient failure and returns the second success."""
+    call_count = {"n": 0}
+
+    def flaky_run(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise TimeoutError("simulated session hang")
+        return ("PONG", _DEFAULT_METADATA)
+
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(cli.runner, "run", side_effect=flaky_run),
+        patch("sys.argv", ["claude-i", "--retries", "2", "hello"]),
+    ):
+        # No SystemExit expected — second attempt succeeds.
+        cli.main()
+    captured = capsys.readouterr()
+    assert "PONG" in captured.out
+    # Retry banner on stderr documents the absorption.
+    assert "attempt 1/3 failed" in captured.err
+    assert "retrying" in captured.err
+    assert call_count["n"] == 2, (
+        f"--retries 2 should call runner twice for one failure; got {call_count['n']}"
+    )
+
+
+def test_retries_exhaustion_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
+    """--retries N exhausts after N+1 attempts and exits with RUNTIME_ERROR.
+
+    Banner appears for each non-final attempt; the final failure prints
+    only the bare error message (the operator already saw the retry trail).
+    """
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(
+            cli.runner, "run", side_effect=TimeoutError("persistent hang")
+        ) as run_mock,
+        patch("sys.argv", ["claude-i", "--retries", "2", "hello"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+    assert exc.value.code == 1
+    assert run_mock.call_count == 3, (
+        f"--retries 2 should make 3 total attempts; got {run_mock.call_count}"
+    )
+    captured = capsys.readouterr()
+    # Two retry banners (after attempts 1 and 2) + one final error line.
+    assert captured.err.count("attempt") >= 2
+    assert "persistent hang" in captured.err
+
+
+def test_retries_negative_treated_as_zero() -> None:
+    """Defense-in-depth: a negative --retries value still attempts once.
+
+    ``max(1, args.retries + 1)`` clamps the total attempts to at least 1
+    so a user accidentally passing ``--retries -1`` does not silently
+    skip the call entirely.
+    """
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(
+            cli.runner, "run", side_effect=RuntimeError("fail")
+        ) as run_mock,
+        patch("sys.argv", ["claude-i", "--retries", "-5", "hello"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+    assert exc.value.code == 1
+    assert run_mock.call_count == 1, "negative --retries must still attempt once"

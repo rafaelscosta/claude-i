@@ -230,6 +230,25 @@ def _build_prompt_parser() -> argparse.ArgumentParser:
             "tokens_in, tokens_out, duration_ms}."
         ),
     )
+    # STORY-001.7 / Bug 5 mitigation — opt-in full-session retries.
+    #
+    # Bug 5 (Anthropic-side session hang under burst load) cannot be
+    # eliminated at the claude-i layer because the sub-``claude`` simply
+    # does not produce any output within the timeout. ``--retries`` lets
+    # automation users opt into transparent full-cycle retries: kill the
+    # hung tmux session, spawn a fresh one, try again. Default ``0``
+    # preserves single-shot behavior for backwards-compat.
+    ap.add_argument(
+        "--retries",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "On TimeoutError / RuntimeError, retry the full session up to "
+            "N additional times before exiting non-zero (default: 0). "
+            "Use --retries 3 for non-interactive automation reliability."
+        ),
+    )
     ap.add_argument(
         "extra",
         nargs=argparse.REMAINDER,
@@ -568,24 +587,36 @@ def main() -> None:
     # See runner.run docstring for the four-branch contract (AC-7).
     # STORY-001.5 / Task 6.4a — runner.run returns ``(text, metadata)``;
     # Task 6.4 wires the metadata into ``--output-format json``.
-    try:
-        response, metadata = runner.run(
-            args.prompt,
-            extra_args,
-            args.verbose,
-            args.ready_wait,
-            args.timeout,
-        )
-    except RuntimeError as err:
-        # Branches 2-4: no assistant turn / payload missing / transcript
-        # missing. All map to RUNTIME_ERROR with the error message echoed
-        # to stderr so users can see the diagnostic.
-        print(f"claude-i: {err}", file=sys.stderr)
-        sys.exit(RUNTIME_ERROR)
-    except TimeoutError as err:
-        # Pre-existing branch: Stop hook never fired in time.
-        print(f"claude-i: {err}", file=sys.stderr)
-        sys.exit(RUNTIME_ERROR)
+    #
+    # STORY-001.7 / Bug 5 mitigation — full-session retry loop. ``--retries``
+    # defaults to 0 (single-shot). On non-zero, transient failures
+    # (TimeoutError / RuntimeError) retry the whole spawn cycle. The reaper
+    # registered inside runner.run() already tore down the failed session's
+    # tmux + claude process tree before raising.
+    response: str = ""
+    metadata: Any = {}
+    total_attempts = max(1, args.retries + 1)
+    for attempt in range(1, total_attempts + 1):
+        try:
+            response, metadata = runner.run(
+                args.prompt,
+                extra_args,
+                args.verbose,
+                args.ready_wait,
+                args.timeout,
+            )
+            break  # success
+        except (RuntimeError, TimeoutError) as err:
+            if attempt < total_attempts:
+                print(
+                    f"claude-i: attempt {attempt}/{total_attempts} failed: {err}; "
+                    "retrying...",
+                    file=sys.stderr,
+                )
+                continue
+            # Final attempt failed — propagate the error to exit code 1.
+            print(f"claude-i: {err}", file=sys.stderr)
+            sys.exit(RUNTIME_ERROR)
 
     # Branch 1: verified-empty — empty string returned. cli.main translates
     # to exit 0 only if the caller passed --allow-empty.
