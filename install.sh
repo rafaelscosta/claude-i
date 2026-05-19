@@ -10,7 +10,7 @@
 #   --dry-run             Print the commands that would run, but do not execute them.
 #   --check               Exit 0 if claude-i is already installed and reachable; exit 1 otherwise.
 #   --local <path>        Install from a local sdist/wheel path instead of PyPI. Used by CI
-#                         smoke tests during the v0.2.0 dev pass (before PyPI publish).
+#                         smoke tests; also useful for local dev installs before PyPI publish.
 #
 # Acceptance criteria covered (STORY-001.4):
 #   AC-2  install.sh hosted at repo root, fetchable via curl-pipe-bash
@@ -134,11 +134,11 @@ if [ -n "$LOCAL_PATH" ]; then
     log "Local install path: $LOCAL_PATH"
 fi
 
-# --- platform guard: native Windows is unsupported in v0.2.0 -------------
+# --- platform guard: native Windows is unsupported --------------------------
 # (Aligns with G9 platform guard in src/claude_i/deps.py — exit 3 for parity.)
 case "$OS" in
     MINGW*|MSYS*|CYGWIN*)
-        err "Native Windows is unsupported in v0.2.0. Use WSL2 instead."
+        err "Native Windows is unsupported. Use WSL2 instead."
         exit 1
         ;;
 esac

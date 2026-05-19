@@ -42,10 +42,15 @@ jobs:
         run: pytest tests/
 
       - name: Verify CLI entry point and --version output
+        # Assert that `claude-i --version` exits 0 AND matches the version
+        # declared in pyproject.toml. Reading the version dynamically avoids
+        # the version-bump-CI-skew bug where each release required a manual
+        # edit here (v0.2.1 / v0.2.2 both hit it before this fix).
         run: |
+          expected="claude-i $(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           out="$(claude-i --version)"
-          echo "claude-i --version => $out"
-          test "$out" = "claude-i 0.2.0"
+          echo "claude-i --version => $out (expected: $expected)"
+          test "$out" = "$expected"
 
   check-seed-integrity:
     name: verify seed/claude-i is byte-identical

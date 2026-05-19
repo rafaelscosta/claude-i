@@ -6,10 +6,10 @@
 #   - Fedora:latest container (dnf + pipx path)
 #
 # Strategy: each job builds the sdist locally first, then invokes
-# `install.sh --local dist/claude_i-0.2.0.tar.gz`. This avoids the
-# chicken-and-egg problem of "install.sh references PyPI but PyPI doesn't
-# have v0.2.0 until epic close" (NOTES.md). After epic close + PyPI publish,
-# a follow-up CI hardening can drop `--local` and exercise the PyPI path.
+# `install.sh --local dist/claude_i-<version>.tar.gz`. The version is read
+# from pyproject.toml at runtime (not hardcoded) so bumps don't require
+# editing this file. After PyPI publish, a follow-up CI hardening can drop
+# `--local` and exercise the PyPI path.
 #
 # AC coverage: AC-3, AC-4, AC-5, AC-6, AC-9, AC-10.
 
@@ -85,18 +85,21 @@ jobs:
           ls -la dist/
 
       - name: Install via install.sh --local
-        run: bash install.sh --local dist/claude_i-0.2.0.tar.gz
+        run: |
+          version="$(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          bash install.sh --local "dist/claude_i-${version}.tar.gz"
 
       - name: Verify claude-i is reachable
         run: |
           # AC-9: verify via explicit ~/.local/bin path first, then PATH.
+          expected="claude-i $(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           if [ -x "$HOME/.local/bin/claude-i" ]; then
             out="$("$HOME/.local/bin/claude-i" --version)"
           else
             out="$(claude-i --version)"
           fi
-          echo "claude-i --version => $out"
-          test "$out" = "claude-i 0.2.0"
+          echo "claude-i --version => $out (expected: $expected)"
+          test "$out" = "$expected"
 
   smoke-ubuntu:
     name: smoke (ubuntu-latest, install.sh --local)
@@ -116,17 +119,20 @@ jobs:
           ls -la dist/
 
       - name: Install via install.sh --local
-        run: bash install.sh --local dist/claude_i-0.2.0.tar.gz
+        run: |
+          version="$(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          bash install.sh --local "dist/claude_i-${version}.tar.gz"
 
       - name: Verify claude-i is reachable
         run: |
+          expected="claude-i $(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           if [ -x "$HOME/.local/bin/claude-i" ]; then
             out="$("$HOME/.local/bin/claude-i" --version)"
           else
             out="$(claude-i --version)"
           fi
-          echo "claude-i --version => $out"
-          test "$out" = "claude-i 0.2.0"
+          echo "claude-i --version => $out (expected: $expected)"
+          test "$out" = "$expected"
 
   smoke-fedora:
     name: smoke (fedora:latest container, install.sh --local)
@@ -153,14 +159,17 @@ jobs:
         # uses sudo to install tmux + pipx; in this container, running as root
         # bypasses sudo (sudo defaults to passing through when run as root, or
         # we install sudo above so the no-op variant works).
-        run: bash install.sh --local dist/claude_i-0.2.0.tar.gz
+        run: |
+          version="$(python3 -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          bash install.sh --local "dist/claude_i-${version}.tar.gz"
 
       - name: Verify claude-i is reachable
         run: |
+          expected="claude-i $(python3 -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           if [ -x "$HOME/.local/bin/claude-i" ]; then
             out="$("$HOME/.local/bin/claude-i" --version)"
           else
             out="$(claude-i --version)"
           fi
-          echo "claude-i --version => $out"
-          test "$out" = "claude-i 0.2.0"
+          echo "claude-i --version => $out (expected: $expected)"
+          test "$out" = "$expected"
