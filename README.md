@@ -6,18 +6,18 @@ The interactive `claude` CLI loads everything (hooks, MCPs, skills, plugins); `c
 
 ## Status
 
-Bootstrapping. See `docs/epics/EPIC-001-packaging-and-hardening.md` for full scope.
+**v0.2.2** — production-ready for both interactive use and non-interactive automation. See `docs/epics/EPIC-001-packaging-and-hardening.md` for full scope and `docs/stories/STORY-001.7-*.md` for the most recent changes.
 
 ## Install
 
 claude-i is currently a **private repository** — install paths require read access (be added as a collaborator, or have a PAT with `repo` scope).
 
-> Native Windows is not supported in v0.2.0; use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install). The `claude-i` CLI emits `PLATFORM_ERROR=3` on `sys.platform == "win32"` (G9 platform guard, STORY-001.2).
+> Native Windows is not supported; use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install). The `claude-i` CLI emits `PLATFORM_ERROR=3` on `sys.platform == "win32"` (G9 platform guard, STORY-001.2).
 
-### Option 1 — pipx + git (recommended)
+### Option 1 — pipx + git tag (recommended)
 
 ```bash
-pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.0
+pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.2
 ```
 
 Requires `gh auth login` or a `GH_TOKEN`/`GITHUB_TOKEN` env var with read access to the repo.
@@ -25,29 +25,85 @@ Requires `gh auth login` or a `GH_TOKEN`/`GITHUB_TOKEN` env var with read access
 ### Option 2 — GitHub Release wheel
 
 ```bash
-gh release download v0.2.0 --pattern '*.whl' -R rafaelscosta/claude-i
-pipx install ./claude_i-0.2.0-py3-none-any.whl
+pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2-py3-none-any.whl
 ```
 
 ### Option 3 — sdist (uv-compatible)
 
 ```bash
-gh release download v0.2.0 --pattern '*.tar.gz' -R rafaelscosta/claude-i
-uv tool install ./claude_i-0.2.0.tar.gz
-# or: pipx install ./claude_i-0.2.0.tar.gz
+pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2.tar.gz
+# or: uv tool install ...
 ```
 
 ### Verify
 
 ```bash
-claude-i --version    # → claude-i 0.2.0
-claude-i doctor       # self-diagnostic
+claude-i --version    # → claude-i 0.2.2
+claude-i doctor       # self-diagnostic — should report 5/5 PASS
 ```
 
-### Artifact checksums (v0.2.0)
+### Artifact checksums (v0.2.2)
 
-- `claude_i-0.2.0-py3-none-any.whl` — SHA256 `ee6a455efd90b279114eb460030d9c96ac83a0119b39621ae837b3c709268e10`
-- `claude_i-0.2.0.tar.gz` — SHA256 `28738be41964796c031f4b2927839e3282a890f906866385ead2279879ec4353`
+- `claude_i-0.2.2-py3-none-any.whl` — SHA256 `97992abe632c2ae759378642f8353a861be7d3f84d932c6e0ba85234ed36933d`
+- `claude_i-0.2.2.tar.gz` — SHA256 `f25d84f24916de2a8f6dc017169de71baea030b2b7e56a06e5e5a08e44719084`
+
+## Usage
+
+### Interactive (single-shot)
+
+```bash
+claude-i "What is 2+2?"
+# → 4
+```
+
+### Non-interactive automation / CI / scripts
+
+Use `--retries N` to absorb the upstream Anthropic-side burst-load session hang (Bug 5 in NOTES.md):
+
+```bash
+claude-i --retries 3 "<prompt>"
+```
+
+The runner spawns a fresh tmux session on each retry. Recommended:
+
+| Use case | Invocation |
+|---|---|
+| Interactive single-shot | `claude-i "<prompt>"` |
+| Automation / CI scripts | `claude-i --retries 3 "<prompt>"` |
+| High-burst pipeline | `claude-i --retries 5 "<prompt>"` + 2s sleep between calls |
+
+### Script-friendly first run
+
+On the very first invocation, `claude-i` prompts to install its Stop hook. In a non-TTY context (CI, redirected stdin) this would normally fail with `EOFError`. Opt into auto-install:
+
+```bash
+export CLAUDE_I_AUTO_INSTALL_HOOK=1
+claude-i --retries 3 "<prompt>"
+```
+
+### JSON output
+
+```bash
+claude-i --output-format json --retries 3 "<prompt>"
+# → {"text": "...", "cost_usd": null, "tokens_in": null, "tokens_out": null, "duration_ms": 4231}
+```
+
+### Subcommands
+
+```bash
+claude-i doctor                  # self-diagnostic (5 checks; --json for machine-readable)
+claude-i uninstall               # remove the Stop hook from settings.json
+claude-i reap                    # kill orphaned claude-i-* tmux sessions
+```
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Runtime error (timeout, parse failure, doctor FAIL, all retries exhausted) |
+| 2 | Missing dependency or config error |
+| 3 | Unsupported platform (native Windows; use WSL2) |
 
 ## Public Release (deferred)
 
