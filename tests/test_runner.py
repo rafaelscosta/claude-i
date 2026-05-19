@@ -83,6 +83,23 @@ def _drive_run_until_first_subprocess_call(
         lambda self, *args, **kwargs: '{"transcript_path": "/tmp/dne"}',
     )
     monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    # STORY-001.6 / Bug 1 — payload.stat().st_size == 0 guard. Stub stat() so
+    # the empty-payload branch is skipped (size > 0 means "valid"); the
+    # subsequent JSON read_text() stub returns a parseable transcript spec.
+    monkeypatch.setattr(
+        runner.Path,
+        "stat",
+        lambda self, *a, **kw: type("_FakeStat", (), {"st_size": 42})(),
+    )
+    # STORY-001.6 / Bug 1 — short-circuit the payload grace period to keep
+    # tests fast and deterministic.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_payload",
+        lambda payload, timeout=0.0, interval=0.0: payload.exists(),
+    )
+    # STORY-001.6 / Bug 4 — short-circuit transcript-retry deadline.
+    monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
     # time.sleep should be a no-op so the test runs fast.
     monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
     # G6 — silence reaper registration so test runs don't install a real
@@ -195,6 +212,21 @@ def test_sentinel_uses_mkstemp(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda self, *args, **kwargs: '{"transcript_path": "/tmp/dne"}',
     )
     monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    # STORY-001.6 / Bug 1 — stub stat() so the empty-payload guard sees a
+    # non-zero size (otherwise FileNotFoundError fires on the stubbed payload).
+    monkeypatch.setattr(
+        runner.Path,
+        "stat",
+        lambda self, *a, **kw: type("_FakeStat", (), {"st_size": 42})(),
+    )
+    # STORY-001.6 / Bug 1 — short-circuit grace period for test speed.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_payload",
+        lambda payload, timeout=0.0, interval=0.0: payload.exists(),
+    )
+    # STORY-001.6 / Bug 4 — short-circuit transcript retry for test speed.
+    monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
     monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
     # G6 — silence reaper registration (see _drive helper).
     monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _session: None)
@@ -246,6 +278,21 @@ def test_cleanup_registered_after_session_start(
         lambda self, *args, **kwargs: '{"transcript_path": "/tmp/dne"}',
     )
     monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    # STORY-001.6 / Bug 1 — stub stat() so the empty-payload guard sees a
+    # non-zero size for the stubbed payload Path.
+    monkeypatch.setattr(
+        runner.Path,
+        "stat",
+        lambda self, *a, **kw: type("_FakeStat", (), {"st_size": 42})(),
+    )
+    # STORY-001.6 / Bug 1 — short-circuit grace period for test speed.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_payload",
+        lambda payload, timeout=0.0, interval=0.0: payload.exists(),
+    )
+    # STORY-001.6 / Bug 4 — short-circuit transcript retry for test speed.
+    monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
     monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
     monkeypatch.setattr(runner.reaper, "register_cleanup", fake_register)
 
@@ -309,6 +356,26 @@ def _stub_runner_io(
     monkeypatch.setattr(runner.Path, "exists", fake_exists)
     monkeypatch.setattr(runner.Path, "read_text", fake_read_text)
     monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    # STORY-001.6 / Bug 1 — stub stat() to a non-zero size so the
+    # empty-payload guard does not interfere with branch-specific tests.
+    # The "test_empty_payload_raises_clean_runtime_error" test overrides this
+    # by setting stat().st_size = 0 explicitly via its own monkeypatch.
+    monkeypatch.setattr(
+        runner.Path,
+        "stat",
+        lambda self, *a, **kw: type("_FakeStat", (), {"st_size": 42})(),
+    )
+    # STORY-001.6 / Bug 1 — neutralize the payload grace period in tests so
+    # Branch 3 / Branch 4 raise immediately without burning 2s of wallclock.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_payload",
+        lambda payload, timeout=0.0, interval=0.0: payload.exists(),
+    )
+    # STORY-001.6 / Bug 4 — neutralize the transcript-retry deadline in tests
+    # so Branch 2 ("no assistant message") raises immediately without burning
+    # the 10s default retry window.
+    monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
     monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
     monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _s: None)
 
@@ -589,15 +656,10 @@ def test_stale_sentinels_cleaned_on_run(
     os.utime(old, (twenty_five_hours_ago, twenty_five_hours_ago))
     os.utime(old_payload, (twenty_five_hours_ago, twenty_five_hours_ago))
 
-    # Redirect Path("/tmp") to our tmp_dir so the cleanup helper scans there.
-    real_path_cls = runner.Path
-
-    def fake_path(arg: str) -> _Path:
-        if arg == "/tmp":
-            return tmp_dir
-        return real_path_cls(arg)
-
-    monkeypatch.setattr(runner, "Path", fake_path)
+    # STORY-001.6 / Bug 2 — _cleanup_stale_sentinels uses tempfile.gettempdir()
+    # instead of hardcoded "/tmp". Redirect that function so the helper walks
+    # our tmp_dir instead of the system tempdir.
+    monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_dir))
     runner._cleanup_stale_sentinels()
     assert not old.exists(), "stale sentinel must be deleted"
     assert not old_payload.exists(), "stale payload sidecar must be deleted"
@@ -609,12 +671,11 @@ def test_stale_sentinels_silently_swallows_errors(
 ) -> None:
     """Cleanup must NEVER raise — best-effort housekeeping only.
 
-    Stubs ``Path("/tmp").glob`` to raise. The helper must catch and return
-    without propagating; ``runner.run`` depends on this contract because the
-    cleanup runs BEFORE the session is created (a raise here would abort
-    the run before any useful work).
+    Stubs ``Path(tempfile.gettempdir()).glob`` to raise. The helper must
+    catch and return without propagating; ``runner.run`` depends on this
+    contract because the cleanup runs BEFORE the session is created (a
+    raise here would abort the run before any useful work).
     """
-    real_path_cls = runner.Path
 
     class BoomPath:
         def __init__(self, _arg: str) -> None: ...
@@ -622,10 +683,131 @@ def test_stale_sentinels_silently_swallows_errors(
             raise OSError("boom")
 
     def fake_path(arg: str) -> Any:
-        if arg == "/tmp":
-            return BoomPath(arg)
-        return real_path_cls(arg)
+        # STORY-001.6 / Bug 2 — match whichever value tempfile.gettempdir()
+        # returns at runtime instead of hardcoding "/tmp". This test
+        # short-circuits the helper by making any Path() call return a Boom
+        # so the test focuses on "the helper does not raise".
+        return BoomPath(arg)
 
     monkeypatch.setattr(runner, "Path", fake_path)
     # Must not raise.
     runner._cleanup_stale_sentinels()
+
+
+# ---------------------------------------------------------------------------
+# STORY-001.6 / Bug 1 — payload grace period + empty payload guard
+# ---------------------------------------------------------------------------
+
+
+def test_payload_grace_period_succeeds_when_payload_appears_late(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """``_wait_for_payload`` returns True when payload appears within timeout."""
+    from pathlib import Path as _Path
+    payload = _Path(str(tmp_path)) / "claude-i-test.done.json"
+
+    # First call: not yet on disk. Second call: present.
+    poll_count = {"n": 0}
+
+    def fake_exists(self: Any) -> bool:
+        poll_count["n"] += 1
+        if poll_count["n"] < 2:
+            return False
+        return True
+
+    monkeypatch.setattr(runner.Path, "exists", fake_exists)
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+
+    assert runner._wait_for_payload(payload, timeout=1.0, interval=0.01) is True
+    assert poll_count["n"] >= 2, "must poll at least twice (initial false then true)"
+
+
+def test_payload_grace_period_returns_false_after_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """``_wait_for_payload`` returns False after grace exhaustion."""
+    from pathlib import Path as _Path
+    payload = _Path(str(tmp_path)) / "claude-i-test.done.json"
+
+    # Always return False — payload never appears.
+    monkeypatch.setattr(runner.Path, "exists", lambda self: False)
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+
+    # Short timeout for test speed; the helper uses time.monotonic() which is
+    # not stubbed, so the deadline is real but tiny.
+    assert runner._wait_for_payload(payload, timeout=0.05, interval=0.01) is False
+
+
+def test_payload_grace_period_short_circuits_on_zero_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """``_wait_for_payload`` with timeout<=0 returns ``payload.exists()`` immediately."""
+    from pathlib import Path as _Path
+    payload = _Path(str(tmp_path)) / "claude-i-test.done.json"
+
+    monkeypatch.setattr(runner.Path, "exists", lambda self: True)
+    assert runner._wait_for_payload(payload, timeout=0.0, interval=0.01) is True
+
+    monkeypatch.setattr(runner.Path, "exists", lambda self: False)
+    assert runner._wait_for_payload(payload, timeout=0.0, interval=0.01) is False
+
+
+def test_empty_payload_raises_clean_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """STORY-001.6 / Bug 1 / Branch 3b — 0-byte payload raises RuntimeError, not JSONDecodeError.
+
+    Reproduces the secondary failure mode where the hook script's ``cat``
+    received closed stdin and produced a 0-byte payload. Without the guard,
+    ``json.loads("")`` would raise ``JSONDecodeError`` which ``cli.main``
+    does NOT catch (only ``RuntimeError`` + ``TimeoutError``), producing a
+    raw stack trace. The guard converts it to the friendly Branch 3b error.
+    """
+    sub_mock, _captured = _make_subprocess_capture()
+    monkeypatch.setattr(runner, "subprocess", MagicMock(run=sub_mock))
+    monkeypatch.setattr(runner.Path, "exists", lambda self: True)
+    monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    # Stub stat() to return 0-byte size for the payload (triggers Branch 3b).
+    monkeypatch.setattr(
+        runner.Path,
+        "stat",
+        lambda self, *a, **kw: type("_FakeStat", (), {"st_size": 0})(),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_payload",
+        lambda payload, timeout=0.0, interval=0.0: True,
+    )
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _s: None)
+    monkeypatch.setattr(runner, "_cleanup_stale_sentinels", lambda: None)
+
+    with pytest.raises(RuntimeError, match="hook fired but payload empty"):
+        runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=1)
+
+
+def test_cleanup_stale_sentinels_uses_tempfile_gettempdir(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """STORY-001.6 / Bug 2 — `_cleanup_stale_sentinels` uses tempfile.gettempdir().
+
+    Validates the macOS fix: on macOS the system tempdir is
+    ``/var/folders/<hash>/T/``, not ``/tmp``. The v0.2.0 hardcoded ``/tmp``
+    silently found nothing and left sentinels to accumulate.
+    """
+    import os
+    import time as _time
+    from pathlib import Path as _Path
+
+    tmp_dir = _Path(str(tmp_path))
+    old = tmp_dir / "claude-i-old.done"
+    old.touch()
+    twenty_five_hours_ago = _time.time() - (25 * 3600)
+    os.utime(old, (twenty_five_hours_ago, twenty_five_hours_ago))
+
+    # Override tempfile.gettempdir() so the cleanup walks our tmp_dir.
+    monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_dir))
+    runner._cleanup_stale_sentinels()
+    assert not old.exists(), (
+        "cleanup must read tempfile.gettempdir(), not hardcoded /tmp/"
+    )

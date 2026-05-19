@@ -149,7 +149,7 @@ _STALE_SENTINEL_SECONDS: float = 86400.0  # 24h
 
 
 def _cleanup_stale_sentinels() -> None:
-    """Delete ``/tmp/claude-i-*.done`` files older than 24h.
+    """Delete ``<tempdir>/claude-i-*.done`` files older than 24h.
 
     STORY-001.5 / Task 6.6 / Gap G15. Best-effort:
 
@@ -160,13 +160,19 @@ def _cleanup_stale_sentinels() -> None:
       not a control-flow gate. ``runner.run`` must NEVER fail because of
       cleanup logic.
 
+    STORY-001.6 / Bug 2 — uses ``tempfile.gettempdir()`` instead of
+    hardcoded ``/tmp`` so the cleanup actually runs on macOS, where
+    ``tempfile.mkstemp()`` writes to ``$TMPDIR=/var/folders/<hash>/T/``.
+    The v0.2.0 form globbed ``/tmp/`` and silently found nothing on macOS,
+    letting sentinels accumulate (437 observed in production).
+
     Companion to ``runner.run``'s ``finally`` block which removes THIS run's
     sentinel + payload; this helper handles the orphan case where a prior
     run crashed before reaching its finally.
     """
     threshold = time.time() - _STALE_SENTINEL_SECONDS
     try:
-        candidates = list(Path("/tmp").glob("claude-i-*.done"))
+        candidates = list(Path(tempfile.gettempdir()).glob("claude-i-*.done"))
     except Exception:
         # Glob itself failed (highly unlikely) — give up silently.
         return
@@ -187,6 +193,77 @@ def _cleanup_stale_sentinels() -> None:
 #: 250ms balances "responsive" (poller returns shortly after the TUI is ready)
 #: against "noisy" (every poll fires a ``tmux capture-pane`` subprocess).
 _READY_POLL_INTERVAL: float = 0.25
+
+#: STORY-001.6 / Bug 1 — grace period for the Stop hook payload to appear on
+#: disk AFTER the sentinel has been touched. With the v0.2.1 atomic-rename
+#: ``HOOK_CMD`` the payload should be visible the instant the sentinel is
+#: touched (mv-rename is atomic on POSIX), but we keep a small grace as
+#: defense-in-depth for filesystems where cross-process stat() visibility
+#: lags. 2s is generous; production observations show <100ms.
+_PAYLOAD_GRACE_SECONDS: float = 2.0
+_PAYLOAD_POLL_INTERVAL: float = 0.05
+
+#: STORY-001.6 / Bug 4 — Claude Code 2.1.143 sometimes fires the Stop hook
+#: BEFORE the final assistant turn is flushed to the transcript JSONL file.
+#: The runner polls the transcript for the assistant message with this
+#: deadline. 10s covers observed flushes (sub-second in practice) without
+#: starving short prompts that legitimately produce no assistant turn.
+_TRANSCRIPT_RETRY_SECONDS: float = 10.0
+_TRANSCRIPT_POLL_INTERVAL: float = 0.2
+
+
+def _read_last_assistant_from_transcript(
+    transcript: Path,
+) -> dict[str, object] | None:
+    """Return the last ``role == "assistant"`` message from a transcript JSONL.
+
+    STORY-001.6 / Bug 4 — helper for the transcript-retry loop in ``run()``.
+    Returns ``None`` when the transcript has no assistant message yet (so the
+    caller can retry) or when the file vanished between checks. Malformed
+    JSON lines are skipped silently (matches the seed's tolerant parse).
+    """
+    try:
+        text = transcript.read_text()
+    except (OSError, FileNotFoundError):
+        return None
+    last: dict[str, object] | None = None
+    for line in text.splitlines():
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if msg.get("message", {}).get("role") == "assistant":
+            last = msg["message"]
+    return last
+
+
+def _wait_for_payload(
+    payload: Path,
+    timeout: float = _PAYLOAD_GRACE_SECONDS,
+    interval: float = _PAYLOAD_POLL_INTERVAL,
+) -> bool:
+    """Block up to ``timeout`` seconds for ``payload`` to appear on disk.
+
+    STORY-001.6 / Bug 1 — companion to the sentinel-watch loop in
+    ``runner.run``. Once the sentinel exists, this helper polls for the
+    payload file. Returns True on success, False on grace exhaustion.
+
+    The caller decides what to do with False (typically raise
+    ``RuntimeError("hook fired but no payload written")``). Caller-side
+    raise (instead of in-helper) keeps the "what to raise" decision next
+    to the surrounding 4-branch contract docstring.
+
+    ``timeout <= 0`` short-circuits: returns ``payload.exists()`` immediately.
+    """
+    if timeout <= 0:
+        return payload.exists()
+    deadline = time.monotonic() + timeout
+    while True:
+        if payload.exists():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
 
 
 def _wait_for_tui_ready(
@@ -327,9 +404,17 @@ def run(
        ``role == "assistant"``. ``run()`` raises
        ``RuntimeError("no assistant message in transcript")``.
     3. **Payload file never written** — Stop hook fired (sentinel exists)
-       but ``<sentinel>.json`` is missing. ``run()`` raises
-       ``RuntimeError("hook fired but no payload written")``. (Replaces
-       the seed's fake-success ``return "(hook fired but no payload written)"``.)
+       but ``<sentinel>.json`` is missing AFTER the STORY-001.6 grace period
+       (2s, polled at 50ms). ``run()`` raises ``RuntimeError("hook fired
+       but no payload written")``. (Replaces the seed's fake-success
+       ``return "(hook fired but no payload written)"``.) The v0.2.1
+       atomic-rename ``HOOK_CMD`` should make this branch unreachable in
+       practice; the grace + raise remain as defense-in-depth.
+    3b. **Payload empty** — payload file exists but is 0 bytes (e.g. the
+       hook's ``cat`` ran with closed stdin and produced no content).
+       ``run()`` raises ``RuntimeError("hook fired but payload empty")``
+       — a friendlier surface than the bare ``JSONDecodeError`` that
+       ``json.loads("")`` would otherwise propagate to ``cli.main``.
     4. **Transcript path missing** — the payload references a transcript
        file that does not exist on disk. ``run()`` raises
        ``RuntimeError(f"transcript missing: {transcript}")``. (Replaces
@@ -363,6 +448,23 @@ def run(
     sentinel = Path(sentinel_str)
     payload = Path(str(sentinel) + ".json")
     session = f"claude-i-{os.getpid()}"
+
+    # STORY-001.6 / Bug 1 — REAL ROOT CAUSE: the v0.2.0 code waited for
+    # ``sentinel.exists()`` to become True, BUT ``mkstemp`` already created
+    # the sentinel above. The wait loop exited immediately, BEFORE the Stop
+    # hook ever fired, then raised "hook fired but no payload written"
+    # because the payload truly had not been written yet. The handoff
+    # diagnosed this as a touch/cat race; empirically it is a sentinel-
+    # already-existed bug masked by accident-of-timing.
+    #
+    # Fix: unlink the sentinel here so the wait loop's ``not sentinel.exists()``
+    # is True until the hook re-touches it. We only need the PATH from
+    # mkstemp (claim-and-release pattern); the atomicity of mkstemp still
+    # protects us from another process claiming the same name in the
+    # microsecond between unlink and the hook's touch — that race is now
+    # extremely unlikely (mkstemp uses unique random suffixes) and would
+    # at worst cause a TimeoutError, never a fake-success.
+    sentinel.unlink(missing_ok=True)
 
     # Build the claude command for ``sh -c``. ``shlex.quote`` is essential —
     # naive interpolation breaks on prompts containing spaces or shell
@@ -450,11 +552,38 @@ def run(
         # fake-success return that printed an error string as if the run
         # had succeeded (then exit 0). RuntimeError signals failure to the
         # caller, which translates to RUNTIME_ERROR.
-        if not payload.exists():
+        #
+        # STORY-001.6 / Bug 1 — the v0.2.0 form raised here immediately when
+        # ``payload.exists()`` was False at the instant the sentinel was
+        # observed, even though the payload often arrived microseconds
+        # later (touch/cat race). The v0.2.1 atomic-rename HOOK_CMD makes
+        # the race impossible, but we keep a 2s polling grace as
+        # defense-in-depth for filesystems with non-zero cross-process
+        # stat() lag and to absorb any future hook-script regression.
+        if not _wait_for_payload(payload):
             raise RuntimeError("hook fired but no payload written")
+        # STORY-001.6 / Bug 1 / Branch 3b — empty payload guard. The
+        # atomic-rename HOOK_CMD only commits the rename after the cat
+        # succeeds, so a 0-byte payload should be impossible there. But
+        # if a user has a legacy hook AND the rare race scenario where
+        # cat exits 0 with no stdin, the JSON parser below would raise
+        # JSONDecodeError which cli.main does NOT catch (only RuntimeError
+        # + TimeoutError). Raise a friendly RuntimeError here so users
+        # see a clean error message instead of a stack trace.
+        if payload.stat().st_size == 0:
+            raise RuntimeError("hook fired but payload empty")
         hook_input = json.loads(payload.read_text())
         transcript = Path(hook_input.get("transcript_path", ""))
         # G8 — Branch 4: transcript path missing.
+        #
+        # STORY-001.6 / Bug 4 — Claude Code 2.1.143 occasionally references a
+        # ``transcript_path`` in the Stop hook payload before the file is
+        # flushed to disk. Poll for it within the retry window before
+        # declaring the transcript truly missing.
+        if not transcript.exists():
+            transcript_deadline = time.time() + _TRANSCRIPT_RETRY_SECONDS
+            while not transcript.exists() and time.time() < transcript_deadline:
+                time.sleep(_TRANSCRIPT_POLL_INTERVAL)
         if not transcript.exists():
             raise RuntimeError(f"transcript missing: {transcript}")
 
@@ -464,14 +593,17 @@ def run(
         # can still serialize ``--output-format json`` without crashing.
         metadata = _build_metadata(start_time, hook_input)
 
-        last: dict[str, object] | None = None
-        for line in transcript.read_text().splitlines():
-            try:
-                msg = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if msg.get("message", {}).get("role") == "assistant":
-                last = msg["message"]
+        # STORY-001.6 / Bug 4 — Claude Code 2.1.143 occasionally fires the
+        # Stop hook BEFORE the assistant turn is flushed to the transcript
+        # JSONL file. Polling the transcript with a generous retry window
+        # absorbs that race. The deadline is shared with the user-facing
+        # ``--timeout``; in practice the assistant message lands within
+        # a second of the hook fire.
+        last = _read_last_assistant_from_transcript(transcript)
+        transcript_deadline = time.time() + _TRANSCRIPT_RETRY_SECONDS
+        while last is None and time.time() < transcript_deadline:
+            time.sleep(_TRANSCRIPT_POLL_INTERVAL)
+            last = _read_last_assistant_from_transcript(transcript)
         # G8 — Branch 2: no assistant turn was ever recorded. Distinct from
         # Branch 1 (verified-empty), where the assistant turn exists but
         # yielded no text blocks. Callers can tell them apart.

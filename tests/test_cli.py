@@ -12,6 +12,8 @@ No real ``tmux`` / ``claude`` is invoked — ``runner.run`` is mocked.
 
 from __future__ import annotations
 
+import time
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -500,9 +502,9 @@ def test_stale_sentinels_age_filter(
     """``_stale_sentinels`` skips files younger than 24h (resolves @po C-4).
 
     Creates two .done files — one recent, one with mtime set to 25h ago —
-    and asserts only the old one is returned. Redirects ``cli.Path`` so
-    ``_stale_sentinels``'s ``Path("/tmp").glob(...)`` walks our tmp dir
-    instead of the real ``/tmp``.
+    and asserts only the old one is returned. Redirects ``tempfile.gettempdir``
+    (STORY-001.6 / Bug 2) so the helper walks our tmp dir instead of the real
+    system tempdir.
     """
     import os
     from pathlib import Path as _Path
@@ -515,15 +517,9 @@ def test_stale_sentinels_age_filter(
     twenty_five_hours_ago = time.time() - (25 * 3600)
     os.utime(old, (twenty_five_hours_ago, twenty_five_hours_ago))
 
-    # Redirect cli.Path so Path("/tmp") in _stale_sentinels becomes our tmp_dir.
-    # Returning the directly-bound _Path(tmp_dir) avoids the recursion that
-    # patching .glob on the Path class would cause.
-    def fake_path(arg: str) -> _Path:
-        if arg == "/tmp":
-            return tmp_dir
-        return _Path(arg)
-
-    monkeypatch.setattr(cli, "Path", fake_path)
+    # STORY-001.6 / Bug 2 — _stale_sentinels now uses tempfile.gettempdir()
+    # instead of hardcoded "/tmp". Redirect the function instead of Path.
+    monkeypatch.setattr(cli.tempfile, "gettempdir", lambda: str(tmp_dir))
     stale = cli._stale_sentinels()
     assert old in stale
     assert recent not in stale
@@ -598,6 +594,30 @@ def test_reap_subcommand_zero_count_exits_0(
     assert "no orphaned sessions found" in out
 
 
-# Local import so the helper above can use it. Placed at end to avoid the
-# isort/E402 conflict with the module-level imports.
-import time  # noqa: E402
+# ---------------------------------------------------------------------------
+# STORY-001.6 / Bug 2 — doctor stale-sentinels uses tempfile.gettempdir()
+# ---------------------------------------------------------------------------
+
+
+def test_stale_sentinels_uses_tempfile_gettempdir(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """STORY-001.6 / Bug 2 — `_stale_sentinels` uses tempfile.gettempdir(), not /tmp.
+
+    Mirrors the runner-side fix. Without this, the doctor check on macOS
+    silently sees zero sentinels (real ones live in ``/var/folders/.../T/``)
+    and reports PASS even when 437 sentinels are accumulating.
+    """
+    import os
+    from pathlib import Path as _Path
+    tmp_dir = _Path(str(tmp_path))
+    old = tmp_dir / "claude-i-old.done"
+    old.touch()
+    twenty_five_hours_ago = time.time() - (25 * 3600)
+    os.utime(old, (twenty_five_hours_ago, twenty_five_hours_ago))
+
+    monkeypatch.setattr(cli.tempfile, "gettempdir", lambda: str(tmp_dir))
+    stale = cli._stale_sentinels()
+    assert old in stale, (
+        f"doctor check (e) must read tempfile.gettempdir(); got stale={stale}"
+    )

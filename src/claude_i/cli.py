@@ -19,6 +19,7 @@ import argparse
 import json
 import shutil
 import sys
+import tempfile
 import time
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -361,15 +362,20 @@ def _check_settings_json_valid() -> dict[str, str]:
 
 
 def _stale_sentinels(now: float | None = None) -> list[Path]:
-    """Return the list of ``/tmp/claude-i-*.done`` files older than 24h.
+    """Return the list of ``<tempdir>/claude-i-*.done`` files older than 24h.
 
     ``now`` is overridable for tests; defaults to ``time.time()``. Younger
     files are considered "in-flight" and excluded — matches AC-7 cleanup
     semantics. Symlinks and broken stat() calls are silently skipped.
+
+    STORY-001.6 / Bug 2 — uses ``tempfile.gettempdir()`` instead of
+    hardcoded ``/tmp`` so the doctor check actually finds sentinels on
+    macOS (where ``$TMPDIR`` defaults to ``/var/folders/<hash>/T/``).
+    Mirrors the same fix in ``runner._cleanup_stale_sentinels``.
     """
     threshold = (now if now is not None else time.time()) - _STALE_SENTINEL_SECONDS
     stale: list[Path] = []
-    for path in Path("/tmp").glob("claude-i-*.done"):
+    for path in Path(tempfile.gettempdir()).glob("claude-i-*.done"):
         try:
             if path.stat().st_mtime < threshold:
                 stale.append(path)
@@ -387,11 +393,12 @@ def _check_stale_sentinels() -> dict[str, str]:
     in-flight ``claude-i`` invocation and would generate noisy false positives.
     """
     stale = _stale_sentinels()
+    tempdir = tempfile.gettempdir()
     if not stale:
         return {
             "name": "stale_sentinels",
             "status": "pass",
-            "detail": "no stale sentinel files in /tmp",
+            "detail": f"no stale sentinel files in {tempdir}",
         }
     sample = ", ".join(str(p) for p in stale[:3])
     suffix = "..." if len(stale) > 3 else ""
