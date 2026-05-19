@@ -267,3 +267,55 @@ The IP-protected status is set by operator (rafaelscosta). To unlock public dist
 4. Operator flips repo to PUBLIC (optional but recommended for transparency).
 
 This section is the source of truth. The workflow guard is the technical enforcement.
+
+## STORY-001.7 / Bug 4 + Bug 5 — Payload-first extraction + --retries
+
+**Date:** 2026-05-19
+**Author:** @dev (Dex) closing STORY-001.7
+
+### Bug 4 — ELIMINATED via payload-first extraction
+
+The Stop hook payload from Claude Code 2.1.143+ contains
+``last_assistant_message`` (the full final assistant response). The runner
+now reads this field FIRST and skips the transcript JSONL parse entirely
+on the happy path. Eliminates both Bug 4a (assistant message not flushed)
+and Bug 4b (transcript file never written; observed ~60% of test runs).
+
+Fallback to transcript parsing preserved for older claude-code versions.
+
+### Bug 5 — Anthropic-side session hang under burst load
+
+**Symptom:** ``claude-i: No Stop hook signal after 90s``. Sub-claude
+process hangs during prompt processing; Stop hook never fires; payload
+never written.
+
+**Empirical pattern:**
+- Single manual shell invocation: 10/10 succeed (~5s each).
+- 10 sequential Python ``subprocess.run`` calls in tight loop: 4-6/10
+  hit 90s timeout without producing output.
+- Bug rate scales with invocation tightness.
+
+**Root cause:** Cannot be eliminated at claude-i layer. Sub-claude
+itself is unresponsive — no Stop hook signal of any kind. Likely upstream
+Anthropic rate limiting or session-bootstrap latency under burst load.
+
+**Mitigation:** ``--retries N`` (default 0). Each retry tears down the
+hung tmux session via the existing reaper and spawns a fresh one. Test
+data with ``--retries 3``: 10/10 success in pytest's reliability test.
+
+**Operator guidance:**
+- Interactive single-shot use: ``claude-i "<prompt>"`` (no flag needed).
+- Automation / CI / scripts: ``claude-i --retries 3 "<prompt>"``. Each
+  retry adds ~5-10s to worst-case latency; happy path is unaffected.
+- High-burst pipelines: consider ``--retries 5`` and inject ``sleep 2``
+  between successive ``claude-i`` invocations.
+
+### Integration test surface
+
+- ``test_e2e_single_shot_smoke``: 1 invocation with ``--retries 0``.
+  Always asserts Bug 1 / Bug 3b regression strings are absent.
+  Does NOT assert exit 0 (Bug 5 absorption).
+- ``test_e2e_reliability_with_retries``: 10 invocations with ``--retries 3``.
+  Locks the automation-reliability contract — all 10 must succeed.
+  If this test starts flaking, Bug 5 upstream rate has risen above the
+  3-retry design point.
