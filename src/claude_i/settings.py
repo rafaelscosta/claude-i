@@ -15,9 +15,41 @@ import json
 from pathlib import Path
 from typing import Any
 
-# Canonical Stop hook command. Sourced from ``seed/claude-i`` lines 17-22.
+# STORY-001.6 / Bug 1 — Canonical Stop hook command, atomic-rename form.
+#
 # Single source of truth for all modules — never duplicate this string.
+#
+# The v0.2.0 form (``HOOK_CMD_LEGACY`` below) was vulnerable to a touch/cat
+# race condition observed empirically on macOS + Claude Code 2.1.143 with
+# multiple Stop hooks: the sentinel ``touch`` could complete BEFORE the
+# payload ``cat`` flushed, leading the runner to see the sentinel but no
+# payload (Branch 3 / "hook fired but no payload written") even when the
+# payload eventually landed.
+#
+# Atomic rename pattern (this constant): ``cat`` writes to ``$F.json.tmp``,
+# ``mv`` atomically renames to ``$F.json`` (POSIX rename guarantee), THEN
+# ``touch`` writes the sentinel. When the runner sees the sentinel, the
+# payload is guaranteed to be present and complete on disk. ``&&`` between
+# the three steps prevents half-states: a failed ``cat`` leaves no .json
+# rather than an empty one; a failed ``mv`` does not touch the sentinel.
+#
+# ``HOOK_CMD_LEGACY`` is preserved so ``hook_installed()`` recognises v0.2.0
+# installs (no re-prompt on upgrade) and ``remove_hook()`` cleans up either
+# form. ``install_hook()`` always writes the new form.
 HOOK_CMD: str = (
+    'if [ -n "$CLAUDE_I_SENTINEL" ]; then '
+    'cat > "$CLAUDE_I_SENTINEL.json.tmp" && '
+    'mv "$CLAUDE_I_SENTINEL.json.tmp" "$CLAUDE_I_SENTINEL.json" && '
+    'touch "$CLAUDE_I_SENTINEL"; '
+    "fi"
+)
+
+#: STORY-001.6 / Bug 1 — v0.2.0 Stop hook command, retained for backwards
+#: compatibility. Detected by ``hook_installed()`` so upgrading users are not
+#: re-prompted; removed by ``remove_hook()`` so ``claude-i uninstall`` cleans
+#: up either form. ``install_hook()`` NEVER writes this — only the modern
+#: ``HOOK_CMD`` above goes onto disk for fresh installs.
+HOOK_CMD_LEGACY: str = (
     'if [ -n "$CLAUDE_I_SENTINEL" ]; then '
     'cat > "$CLAUDE_I_SENTINEL.json"; '
     'touch "$CLAUDE_I_SENTINEL"; '

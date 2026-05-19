@@ -27,12 +27,25 @@ path. If the lock cannot be acquired within 5 seconds, claude-i exits.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from typing import Any
 
 from claude_i.exit_codes import CONFIG_ERROR, RUNTIME_ERROR
-from claude_i.settings import HOOK_CMD, SETTINGS, load_settings, write_settings
+from claude_i.settings import (
+    HOOK_CMD,
+    HOOK_CMD_LEGACY,
+    SETTINGS,
+    load_settings,
+    write_settings,
+)
+
+#: STORY-001.6 / Bug 3 — env var that opts a non-TTY (script/CI) invocation
+#: into auto-installing the Stop hook instead of failing with a structured
+#: error. Documented in NOTES.md and README. Default: unset (interactive
+#: invocations get the prompt; non-interactive ones fail loud).
+AUTO_INSTALL_ENV_VAR: str = "CLAUDE_I_AUTO_INSTALL_HOOK"
 
 # G7 — fcntl is POSIX-only. On Windows, ``assert_not_windows()`` exits at
 # startup so this code path is unreachable; the conditional import keeps the
@@ -56,46 +69,99 @@ _LOCK_RETRY_INTERVAL: float = 0.1
 def _is_claude_i_hook_entry(entry: dict[str, Any]) -> bool:
     """Return True when ``entry`` is a well-formed claude-i Stop-hook leaf.
 
-    A correct entry has ``type == "command"`` and ``command == HOOK_CMD``.
+    A correct entry has ``type == "command"`` and ``command`` equal to
+    EITHER the current ``HOOK_CMD`` (atomic-rename form, v0.2.1+) OR
+    ``HOOK_CMD_LEGACY`` (single-step form, v0.2.0). Accepting both is what
+    lets v0.2.0 users upgrade without being re-prompted to install — the
+    silent upgrade path in ``ensure_hook`` handles the actual migration.
+
     The seed's looser check (``command == HOOK_CMD`` only) would mis-classify
     an entry with the right command string but a different ``type`` (e.g.
     ``http``) as installed; we tighten that.
     """
+    if entry.get("type") != "command":
+        return False
+    return entry.get("command") in (HOOK_CMD, HOOK_CMD_LEGACY)
+
+
+def _is_legacy_hook_entry(entry: dict[str, Any]) -> bool:
+    """Return True when ``entry`` is specifically the v0.2.0 legacy hook.
+
+    Used by ``_only_legacy_hook_installed`` to detect when a silent upgrade
+    is needed. Distinct from ``_is_claude_i_hook_entry`` which accepts either
+    form for the "already installed" check.
+    """
+    return entry.get("type") == "command" and entry.get("command") == HOOK_CMD_LEGACY
+
+
+def _is_current_hook_entry(entry: dict[str, Any]) -> bool:
+    """Return True when ``entry`` is specifically the v0.2.1+ atomic-rename hook."""
     return entry.get("type") == "command" and entry.get("command") == HOOK_CMD
+
+
+def _iter_stop_hook_leaves() -> list[dict[str, Any]]:
+    """Return all well-formed leaf-dict entries from settings.json Stop hooks.
+
+    Filters out malformed entries (non-dict groups, non-list leaves, etc.) so
+    callers can iterate the result without re-doing the structural defense.
+    Returns an empty list when settings.json is missing or malformed JSON —
+    never raises.
+    """
+    if not SETTINGS.exists():
+        return []
+    try:
+        cfg = load_settings()
+    except json.JSONDecodeError:
+        return []
+    stop_groups = cfg.get("hooks", {}).get("Stop", [])
+    if not isinstance(stop_groups, list):
+        return []
+    leaves: list[dict[str, Any]] = []
+    for group in stop_groups:
+        if not isinstance(group, dict):
+            continue
+        group_leaves = group.get("hooks", [])
+        if not isinstance(group_leaves, list):
+            continue
+        for entry in group_leaves:
+            if isinstance(entry, dict):
+                leaves.append(entry)
+    return leaves
 
 
 def hook_installed() -> bool:
     """Return ``True`` when the Stop hook is already present in settings.
 
-    Safe against a missing or malformed settings file: returns ``False``
-    rather than raising. Looks specifically for a well-formed claude-i
-    hook entry (correct ``type`` AND correct ``command``), not just any
-    entry whose command happens to match.
+    Accepts either the current atomic-rename ``HOOK_CMD`` (v0.2.1+) or the
+    legacy single-step ``HOOK_CMD_LEGACY`` (v0.2.0). The silent upgrade path
+    in ``ensure_hook`` migrates legacy installs in-place; this check is
+    deliberately permissive so upgrading users see ``True`` and skip the
+    interactive install prompt.
 
-    G2: the ``matcher`` field at the group level is NOT checked here
-    because ``Stop`` hooks have no documented ``matcher`` schema (see
-    ``NOTES.md``). Future stories may extend this check when / if
-    Anthropic publishes a Stop-event matcher format.
+    Safe against a missing or malformed settings file: returns ``False``
+    rather than raising.
+
+    G2: the ``matcher`` field at the group level is NOT checked here because
+    ``Stop`` hooks have no documented ``matcher`` schema (see ``NOTES.md``).
+    Future stories may extend this check when / if Anthropic publishes a
+    Stop-event matcher format.
     """
-    if not SETTINGS.exists():
-        return False
-    try:
-        cfg = load_settings()
-    except json.JSONDecodeError:
-        return False
-    stop_groups = cfg.get("hooks", {}).get("Stop", [])
-    if not isinstance(stop_groups, list):
-        return False
-    for group in stop_groups:
-        if not isinstance(group, dict):
-            continue
-        leaves = group.get("hooks", [])
-        if not isinstance(leaves, list):
-            continue
-        for entry in leaves:
-            if isinstance(entry, dict) and _is_claude_i_hook_entry(entry):
-                return True
-    return False
+    return any(_is_claude_i_hook_entry(leaf) for leaf in _iter_stop_hook_leaves())
+
+
+def _only_legacy_hook_installed() -> bool:
+    """Return ``True`` when settings.json has the v0.2.0 hook but NOT the v0.2.1 hook.
+
+    STORY-001.6 / Bug 1 — used by ``ensure_hook`` to detect when a silent
+    upgrade is warranted. Returning True triggers ``remove_hook() +
+    install_hook()`` without prompting the user; returning False means
+    either everything is current (no-op) or nothing is installed (interactive
+    prompt path).
+    """
+    leaves = _iter_stop_hook_leaves()
+    has_legacy = any(_is_legacy_hook_entry(leaf) for leaf in leaves)
+    has_current = any(_is_current_hook_entry(leaf) for leaf in leaves)
+    return has_legacy and not has_current
 
 
 def _acquire_lock_with_retry() -> Any | None:
@@ -269,15 +335,73 @@ def remove_hook() -> int:
         _release_lock(lock_handle)
 
 
-def ensure_hook() -> None:
-    """Prompt the user to install the Stop hook if it is missing.
+def _upgrade_legacy_hook() -> None:
+    """Silently remove the v0.2.0 hook and install the v0.2.1 atomic-rename hook.
 
-    Behavioral parity with the seed: prints to ``stderr`` and reads from
-    ``stdin``. ``cli.main`` must short-circuit on ``--version`` BEFORE
-    invoking this function (otherwise CI hangs on ``input()``).
+    STORY-001.6 / Bug 1 — called from ``ensure_hook`` when
+    ``_only_legacy_hook_installed()`` returns True. Does NOT prompt the user;
+    emits one stderr line so the upgrade is visible in logs.
+    """
+    print(
+        "claude-i: detected legacy v0.2.0 Stop hook, upgrading to atomic-rename form",
+        file=sys.stderr,
+    )
+    remove_hook()  # removes BOTH forms; safe because we'll re-install immediately
+    install_hook()
+
+
+def ensure_hook() -> None:
+    """Ensure the Stop hook is installed in settings, prompting or auto-installing.
+
+    Flow (priority order):
+
+    1. **Already installed (current form)** → no-op return.
+    2. **Only legacy v0.2.0 installed** → silent upgrade (``_upgrade_legacy_hook``),
+       no prompt.
+    3. **Not installed + non-TTY stdin + ``CLAUDE_I_AUTO_INSTALL_HOOK=1``** →
+       auto-install silently (script-friendly opt-in).
+    4. **Not installed + non-TTY stdin + env var unset** → print structured
+       error to stderr listing 3 remediation paths and ``sys.exit(CONFIG_ERROR)``.
+       Replaces the EOFError crash that the seed's bare ``input()`` produced.
+    5. **Not installed + TTY stdin** → original interactive prompt.
+
+    ``cli.main`` must short-circuit on ``--version`` BEFORE invoking this
+    function — argparse handles that automatically.
     """
     if hook_installed():
+        if _only_legacy_hook_installed():
+            _upgrade_legacy_hook()
         return
+
+    # Not installed at all. Branch on TTY vs non-TTY before any input() call —
+    # the seed's bare input() crashed with EOFError when stdin was redirected.
+    auto_install = os.environ.get(AUTO_INSTALL_ENV_VAR) == "1"
+    if not sys.stdin.isatty():
+        if auto_install:
+            print(
+                "claude-i: installing Stop hook automatically "
+                f"({AUTO_INSTALL_ENV_VAR}=1, stdin is not a TTY)",
+                file=sys.stderr,
+            )
+            install_hook()
+            return
+        print(
+            f"claude-i: Stop hook not installed in {SETTINGS} and stdin is not a TTY.\n"
+            "Options:\n"
+            "  1. Run `claude-i doctor` (or any claude-i command) from an interactive\n"
+            "     shell once to confirm the install prompt.\n"
+            f"  2. Set {AUTO_INSTALL_ENV_VAR}=1 in your environment to auto-install\n"
+            "     on the first non-TTY invocation (script / CI friendly).\n"
+            f"  3. Edit {SETTINGS} manually and add the Stop hook entry.\n"
+            f"     command: {HOOK_CMD}",
+            file=sys.stderr,
+        )
+        # CONFIG_ERROR (2) — missing required configuration. The user has to
+        # take an action before claude-i can proceed; this is not a transient
+        # runtime error.
+        sys.exit(CONFIG_ERROR)
+
+    # TTY path — original interactive prompt.
     print(f"claude-i needs a Stop hook in {SETTINGS}.", file=sys.stderr)
     print(
         "Gated on $CLAUDE_I_SENTINEL, so it won't affect normal Claude use.",

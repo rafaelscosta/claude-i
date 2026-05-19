@@ -412,3 +412,264 @@ def test_subagent_stop_deferred() -> None:
     # the canonical status label used in NOTES.md headers.
     assert "SubagentStop" in content
     assert "DEFERRED" in content
+
+
+# ---------------------------------------------------------------------------
+# STORY-001.6 / Bug 1 — legacy v0.2.0 hook detection, atomic-rename writes,
+# silent upgrade path
+# ---------------------------------------------------------------------------
+
+
+def test_hook_installed_detects_legacy_v020_hook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Legacy v0.2.0 HOOK_CMD is recognised as installed (backwards compat).
+
+    Upgrading users had the legacy single-step command written by an older
+    ``install_hook``. ``hook_installed()`` must return True so they are NOT
+    re-prompted; ``ensure_hook`` then triggers the silent upgrade path.
+    """
+    target = _redirect_settings(tmp_path, monkeypatch)
+    target.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": settings.HOOK_CMD_LEGACY}
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    assert hook.hook_installed() is True
+
+
+def test_install_hook_writes_atomic_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``install_hook`` always writes the atomic-rename HOOK_CMD, not the legacy form."""
+    target = _redirect_settings(tmp_path, monkeypatch)
+    hook.install_hook()
+    cfg = json.loads(target.read_text())
+    written_cmd = cfg["hooks"]["Stop"][0]["hooks"][0]["command"]
+    assert written_cmd == settings.HOOK_CMD, (
+        "install_hook must write the current HOOK_CMD (atomic-rename form)"
+    )
+    assert written_cmd != settings.HOOK_CMD_LEGACY, (
+        "install_hook must NOT write the legacy form"
+    )
+    # The atomic-rename form has 'mv' and '.json.tmp' as structural markers.
+    assert "mv" in written_cmd
+    assert ".json.tmp" in written_cmd
+
+
+def test_remove_hook_removes_legacy_and_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``remove_hook`` removes BOTH HOOK_CMD and HOOK_CMD_LEGACY entries.
+
+    A user who installed v0.2.0 and then v0.2.1 via the upgrade path should
+    end up with only the new form (upgrade removes legacy first). But if
+    settings.json was hand-edited or some other tool inserted both forms,
+    ``claude-i uninstall`` should clean BOTH up.
+    """
+    target = _redirect_settings(tmp_path, monkeypatch)
+    target.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": settings.HOOK_CMD_LEGACY},
+                                {"type": "command", "command": settings.HOOK_CMD},
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    removed = hook.remove_hook()
+    assert removed == 2, f"both entries must be removed; got {removed}"
+
+
+def test_only_legacy_hook_installed_distinguishes_states(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_only_legacy_hook_installed`` returns True iff legacy present AND new absent."""
+    target = _redirect_settings(tmp_path, monkeypatch)
+
+    # State 1: only legacy installed → True
+    target.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": settings.HOOK_CMD_LEGACY}
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    assert hook._only_legacy_hook_installed() is True
+
+    # State 2: only new installed → False
+    target.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": settings.HOOK_CMD}
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    assert hook._only_legacy_hook_installed() is False
+
+    # State 3: both installed → False (upgrade not needed; uninstall handles both)
+    target.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": settings.HOOK_CMD_LEGACY},
+                                {"type": "command", "command": settings.HOOK_CMD},
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    assert hook._only_legacy_hook_installed() is False
+
+    # State 4: neither installed → False
+    target.write_text(json.dumps({"hooks": {"Stop": []}}))
+    assert hook._only_legacy_hook_installed() is False
+
+
+def test_ensure_hook_upgrades_silently_from_legacy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A settings file with only the legacy hook triggers a silent upgrade.
+
+    No ``input()`` is called (so no EOFError in non-TTY contexts). After
+    ``ensure_hook`` returns, settings.json contains the NEW atomic-rename
+    HOOK_CMD, not the legacy form. A stderr line documents the upgrade.
+    """
+    target = _redirect_settings(tmp_path, monkeypatch)
+    target.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": settings.HOOK_CMD_LEGACY}
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+
+    # If input() were called, this would crash with EOFError — guarding it.
+    def _fail_input(_prompt: str) -> str:
+        raise AssertionError("ensure_hook must NOT prompt during legacy upgrade")
+
+    monkeypatch.setattr("builtins.input", _fail_input)
+    # Pretend stdin is not a TTY — to verify upgrade path bypasses TTY check
+    # entirely (it should — the legacy upgrade happens via the hook_installed
+    # short-circuit BEFORE the TTY guard).
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    hook.ensure_hook()
+
+    # Settings now contain only the new HOOK_CMD.
+    cfg = json.loads(target.read_text())
+    leaves = cfg["hooks"]["Stop"][0]["hooks"]
+    assert len(leaves) == 1
+    assert leaves[0]["command"] == settings.HOOK_CMD
+    # Stderr confirms the upgrade happened.
+    captured = capsys.readouterr()
+    assert "upgrading" in captured.err.lower()
+
+
+def test_ensure_hook_no_tty_exits_with_helpful_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """STORY-001.6 / Bug 3 — non-TTY stdin without auto-install env var → exit 2.
+
+    The seed crashed with ``EOFError: EOF when reading a line`` here. The fix
+    exits with CONFIG_ERROR and prints a structured remediation message that
+    names the env var explicitly so users know how to opt in.
+    """
+    _redirect_settings(tmp_path, monkeypatch)
+    # No hook installed yet, stdin not a TTY, env var unset.
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.delenv(hook.AUTO_INSTALL_ENV_VAR, raising=False)
+
+    with pytest.raises(SystemExit) as exc:
+        hook.ensure_hook()
+    assert exc.value.code == 2, (
+        f"non-TTY install must exit CONFIG_ERROR (2); got {exc.value.code}"
+    )
+    captured = capsys.readouterr()
+    # Remediation message must name the env var so users know how to opt in.
+    assert hook.AUTO_INSTALL_ENV_VAR in captured.err
+    # Three remediation paths must be listed.
+    assert "interactive" in captured.err.lower()
+    assert "manually" in captured.err.lower()
+
+
+def test_ensure_hook_no_tty_with_auto_install_env_var(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """STORY-001.6 / Bug 3 — ``CLAUDE_I_AUTO_INSTALL_HOOK=1`` auto-installs silently.
+
+    Opt-in script-friendly path: when the env var is set and stdin is not a
+    TTY, the hook is installed without prompting and ``ensure_hook`` returns
+    normally. A stderr line documents the auto-install.
+    """
+    target = _redirect_settings(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setenv(hook.AUTO_INSTALL_ENV_VAR, "1")
+
+    # input() must NOT be called.
+    def _fail_input(_prompt: str) -> str:
+        raise AssertionError("ensure_hook must NOT prompt with auto-install env var")
+
+    monkeypatch.setattr("builtins.input", _fail_input)
+
+    hook.ensure_hook()
+
+    # Hook should now be installed.
+    assert hook.hook_installed() is True
+    cfg = json.loads(target.read_text())
+    assert cfg["hooks"]["Stop"][0]["hooks"][0]["command"] == settings.HOOK_CMD
+    # Stderr documents the auto-install.
+    captured = capsys.readouterr()
+    assert "automatically" in captured.err.lower()
