@@ -811,3 +811,163 @@ def test_cleanup_stale_sentinels_uses_tempfile_gettempdir(
     assert not old.exists(), (
         "cleanup must read tempfile.gettempdir(), not hardcoded /tmp/"
     )
+
+
+# ---------------------------------------------------------------------------
+# STORY-001.7 / Bug 4 elimination — payload-first response extraction
+# ---------------------------------------------------------------------------
+
+
+def test_extract_text_from_payload_returns_text_when_field_present() -> None:
+    """``_extract_text_from_payload`` returns ``(text, True)`` for a valid field."""
+    text, came_from_payload = runner._extract_text_from_payload(
+        {"last_assistant_message": "PONG"}
+    )
+    assert text == "PONG"
+    assert came_from_payload is True
+
+
+def test_extract_text_from_payload_falls_back_on_empty_string() -> None:
+    """Empty string in payload falls back so we keep verified-empty semantics."""
+    text, came_from_payload = runner._extract_text_from_payload(
+        {"last_assistant_message": ""}
+    )
+    assert text == ""
+    assert came_from_payload is False
+
+
+def test_extract_text_from_payload_falls_back_on_missing_field() -> None:
+    """Older claude-code that omits the field → fallback path."""
+    text, came_from_payload = runner._extract_text_from_payload(
+        {"transcript_path": "/tmp/something"}
+    )
+    assert text == ""
+    assert came_from_payload is False
+
+
+def test_extract_text_from_payload_falls_back_on_non_string() -> None:
+    """Wrong type (dict, list, None, int) → fallback path, never crash."""
+    for bad_value in (None, {"role": "assistant"}, ["text"], 42, True):
+        text, came_from_payload = runner._extract_text_from_payload(
+            {"last_assistant_message": bad_value}
+        )
+        assert text == ""
+        assert came_from_payload is False, (
+            f"non-string value {bad_value!r} must trigger fallback"
+        )
+
+
+def test_payload_last_assistant_message_preferred_over_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When payload has last_assistant_message, transcript is never read.
+
+    Critical contract: even if the transcript path is bogus (would normally
+    trigger Bug 4b), the run succeeds because the payload-first path
+    bypasses transcript entirely.
+    """
+    sub_mock, _captured = _make_subprocess_capture()
+    monkeypatch.setattr(runner, "subprocess", MagicMock(run=sub_mock))
+    monkeypatch.setattr(runner.Path, "exists", lambda self: True)
+    monkeypatch.setattr(
+        runner.Path,
+        "read_text",
+        lambda self, *args, **kwargs: json.dumps(
+            {
+                "transcript_path": "/nonexistent/path/that/would/bug4",
+                "last_assistant_message": "PONG",
+                "session_id": "test-001-7",
+            }
+        ),
+    )
+    monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    monkeypatch.setattr(
+        runner.Path,
+        "stat",
+        lambda self, *a, **kw: type("_FakeStat", (), {"st_size": 100})(),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_payload",
+        lambda payload, timeout=0.0, interval=0.0: payload.exists(),
+    )
+    monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _s: None)
+    monkeypatch.setattr(runner, "_cleanup_stale_sentinels", lambda: None)
+
+    # Spy on the transcript reader — it must NEVER be called when payload wins.
+    transcript_read_calls = []
+
+    def spy_read(transcript: Any) -> Any:
+        transcript_read_calls.append(transcript)
+        return None
+
+    monkeypatch.setattr(
+        runner, "_read_last_assistant_from_transcript", spy_read
+    )
+
+    text, metadata = runner.run(
+        "hi", [], verbose=False, ready_wait=0.0, timeout=1
+    )
+    assert text == "PONG", f"payload-first must return last_assistant_message; got {text!r}"
+    assert transcript_read_calls == [], (
+        f"transcript reader must NOT be called when payload wins; calls={transcript_read_calls}"
+    )
+    assert metadata["duration_ms"] >= 0
+
+
+def test_transcript_fallback_still_works_when_payload_field_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When last_assistant_message is absent, transcript fallback executes.
+
+    Backwards compat: ensures users on older claude-code versions still get
+    a working extraction via the transcript-parsing path, including the
+    Bug 4 retry window from STORY-001.6.
+    """
+    sub_mock, _captured = _make_subprocess_capture()
+    monkeypatch.setattr(runner, "subprocess", MagicMock(run=sub_mock))
+    monkeypatch.setattr(runner.Path, "exists", lambda self: True)
+    # Payload has transcript_path but NO last_assistant_message.
+    monkeypatch.setattr(
+        runner.Path,
+        "read_text",
+        lambda self, *args, **kwargs: json.dumps(
+            {
+                "transcript_path": "/tmp/transcript-stub",
+                "session_id": "test-001-7-fallback",
+            }
+        )
+        if str(self).endswith(".json")
+        else json.dumps(
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "fallback-OK"}],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    monkeypatch.setattr(
+        runner.Path,
+        "stat",
+        lambda self, *a, **kw: type("_FakeStat", (), {"st_size": 100})(),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_payload",
+        lambda payload, timeout=0.0, interval=0.0: payload.exists(),
+    )
+    monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _s: None)
+    monkeypatch.setattr(runner, "_cleanup_stale_sentinels", lambda: None)
+
+    text, _metadata = runner.run(
+        "hi", [], verbose=False, ready_wait=0.0, timeout=1
+    )
+    assert text == "fallback-OK", (
+        f"transcript fallback must produce text when payload field absent; got {text!r}"
+    )

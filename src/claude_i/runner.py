@@ -212,6 +212,36 @@ _TRANSCRIPT_RETRY_SECONDS: float = 10.0
 _TRANSCRIPT_POLL_INTERVAL: float = 0.2
 
 
+def _extract_text_from_payload(hook_input: dict[str, object]) -> tuple[str, bool]:
+    """Return the assistant response from ``payload["last_assistant_message"]``.
+
+    STORY-001.7 / Bug 4 elimination. Claude Code 2.1.143+ writes the full
+    final assistant response to ``last_assistant_message`` in the Stop hook
+    payload. When this field is present and is a non-empty string, the
+    transcript JSONL is no longer needed — and reading it is unreliable
+    because the file may not be flushed yet (Bug 4a) or may never exist
+    at all (Bug 4b, observed in ~60% of test runs).
+
+    Returns ``(text, came_from_payload)``:
+    - ``came_from_payload=True`` means the caller should USE ``text`` and
+      skip the transcript-parsing fallback. ``text`` is guaranteed to be
+      a non-empty string in this case.
+    - ``came_from_payload=False`` means the field was absent, ``None``, or
+      not a non-empty string (incl. empty string — see Dev Notes in the
+      story). The caller should fall back to parsing the transcript JSONL.
+
+    Why not accept empty strings? Because an empty ``last_assistant_message``
+    could be either (1) older claude-code that uses ``""`` as a default
+    sentinel for "field not populated", or (2) a genuine verified-empty
+    assistant turn. The fallback path can distinguish these cases via the
+    JSONL ``content`` array; payload alone cannot. Falling back is safer.
+    """
+    value = hook_input.get("last_assistant_message")
+    if isinstance(value, str) and value:
+        return value, True
+    return "", False
+
+
 def _read_last_assistant_from_transcript(
     transcript: Path,
 ) -> dict[str, object] | None:
@@ -394,6 +424,15 @@ def run(
     are ``None`` when the Stop hook payload does not surface them (older
     upstream ``claude`` versions).
 
+    STORY-001.7 / Bug 4 elimination — payload-first response extraction.
+    When the Stop hook payload contains a non-empty
+    ``last_assistant_message`` field (Claude Code 2.1.143+), the runner
+    uses that value directly and SKIPS the transcript JSONL read
+    entirely. This bypasses both Bug 4a (transcript flush race) and Bug
+    4b (transcript file never written) for the vast majority of runs.
+    The transcript-parsing fallback is preserved for older claude-code
+    versions and the verified-empty (Branch 1) case.
+
     Return / raise contract (STORY-001.2 / Gap G8 — AC-7, four branches):
 
     1. **Verified-empty assistant turn** — transcript parsed, assistant
@@ -573,19 +612,6 @@ def run(
         if payload.stat().st_size == 0:
             raise RuntimeError("hook fired but payload empty")
         hook_input = json.loads(payload.read_text())
-        transcript = Path(hook_input.get("transcript_path", ""))
-        # G8 — Branch 4: transcript path missing.
-        #
-        # STORY-001.6 / Bug 4 — Claude Code 2.1.143 occasionally references a
-        # ``transcript_path`` in the Stop hook payload before the file is
-        # flushed to disk. Poll for it within the retry window before
-        # declaring the transcript truly missing.
-        if not transcript.exists():
-            transcript_deadline = time.time() + _TRANSCRIPT_RETRY_SECONDS
-            while not transcript.exists() and time.time() < transcript_deadline:
-                time.sleep(_TRANSCRIPT_POLL_INTERVAL)
-        if not transcript.exists():
-            raise RuntimeError(f"transcript missing: {transcript}")
 
         # Task 6.4 — extract optional cost/token metrics from the hook
         # payload. Field names follow the upstream Stop hook contract; when
@@ -593,12 +619,36 @@ def run(
         # can still serialize ``--output-format json`` without crashing.
         metadata = _build_metadata(start_time, hook_input)
 
-        # STORY-001.6 / Bug 4 — Claude Code 2.1.143 occasionally fires the
-        # Stop hook BEFORE the assistant turn is flushed to the transcript
-        # JSONL file. Polling the transcript with a generous retry window
-        # absorbs that race. The deadline is shared with the user-facing
-        # ``--timeout``; in practice the assistant message lands within
-        # a second of the hook fire.
+        # STORY-001.7 / Bug 4 ELIMINATION — payload-first response extraction.
+        #
+        # Claude Code 2.1.143+ writes the full final assistant response to
+        # ``last_assistant_message`` in the Stop hook payload. When present,
+        # use it directly and skip the transcript entirely. This bypasses
+        # both Bug 4a (assistant message not flushed to JSONL yet) and Bug
+        # 4b (transcript file referenced by transcript_path never exists on
+        # disk — observed in ~60% of test runs during STORY-001.7 diagnosis).
+        text_from_payload, came_from_payload = _extract_text_from_payload(hook_input)
+        if came_from_payload:
+            return text_from_payload, metadata
+
+        # Fallback path — older claude-code versions, or empty
+        # ``last_assistant_message``. Parse the transcript JSONL the v0.2.1
+        # way (with Bug 4 retry as defense-in-depth) to preserve backwards
+        # compatibility and the verified-empty branch semantics.
+        transcript = Path(hook_input.get("transcript_path", ""))
+        # G8 — Branch 4: transcript path missing.
+        #
+        # STORY-001.6 / Bug 4 mitigation (still relevant on the fallback
+        # path) — poll for the transcript file within the retry window
+        # before declaring it truly missing.
+        if not transcript.exists():
+            transcript_deadline = time.time() + _TRANSCRIPT_RETRY_SECONDS
+            while not transcript.exists() and time.time() < transcript_deadline:
+                time.sleep(_TRANSCRIPT_POLL_INTERVAL)
+        if not transcript.exists():
+            raise RuntimeError(f"transcript missing: {transcript}")
+
+        # STORY-001.6 / Bug 4 retry on assistant-message-not-flushed-yet.
         last = _read_last_assistant_from_transcript(transcript)
         transcript_deadline = time.time() + _TRANSCRIPT_RETRY_SECONDS
         while last is None and time.time() < transcript_deadline:
