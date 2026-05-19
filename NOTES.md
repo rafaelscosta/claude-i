@@ -241,17 +241,37 @@ same tarball content).
 
 **Decision (operator, 2026-05-19):** IP-lock REVERSED. claude-i is published publicly with v0.2.2.
 - Repository: PUBLIC (flipped 2026-05-19)
-- PyPI publication: AUTHORIZED — `claude-i` package live on PyPI
-- Public Homebrew formula: AUTHORIZED — `rafaelscosta/homebrew-claude-i` formula updated to canonical PyPI artifact
+- PyPI publication: AUTHORIZED but DEFERRED — pending Trusted Publisher setup on pypi.org
+- Public Homebrew formula: AUTHORIZED — `rafaelscosta/homebrew-claude-i` formula updated to canonical v0.2.2 GitHub Release artifact
 
 **Rationale for reversal:** v0.2.2 reached production-ready automation reliability (STORY-001.7 closed; 10/10 reliability test with `--retries 3`). Bug 1/2/3 fixed, Bug 4 eliminated, Bug 5 mitigated. The IP-protection rationale from 2026-05-18 (preserving leverage during development) no longer applies once the product is stable and useful.
 
 **Public distribution paths now active:**
-- `pipx install claude-i` (PyPI)
-- `uv tool install claude-i` (PyPI)
-- `brew install rafaelscosta/claude-i/claude-i` (Homebrew tap)
+- `brew install rafaelscosta/claude-i/claude-i` (Homebrew tap — fetches GitHub Release tarball)
 - `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2-py3-none-any.whl` (GitHub Release)
+- `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2.tar.gz` (GitHub Release sdist)
 - `pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.2` (git tag)
+
+**PyPI publication — deferred (operator action required):**
+
+The `publish.yml` workflow is wired for Trusted Publishing via OIDC. PyPI rejected the v0.2.2 dispatch with `invalid-publisher` because no Trusted Publisher is registered for the project yet. Operator setup steps:
+
+1. Create / log into PyPI account.
+2. Visit https://pypi.org/manage/account/publishing/ and add a Pending Publisher with:
+   - PyPI Project Name: `claude-i`
+   - Owner: `rafaelscosta`
+   - Repository: `claude-i`
+   - Workflow filename: `publish.yml`
+   - Environment: `publish`
+3. Re-dispatch the workflow:
+   ```
+   gh workflow run publish.yml --ref v0.2.2 \
+     --field confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE \
+     -R rafaelscosta/claude-i
+   ```
+4. After success, update README install paths to include `pipx install claude-i` (PyPI) at the top.
+
+Until then: Homebrew + GitHub Release paths are the canonical install routes.
 
 **Guard preserved (defense-in-depth):** The `publish.yml` workflow still requires the `confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE` string for any future dispatch. This prevents accidental re-publish of stale/wrong artifacts. The guard is procedural, not policy — it gates dispatch, not the decision.
 

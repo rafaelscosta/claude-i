@@ -10,30 +10,37 @@ The interactive `claude` CLI loads everything (hooks, MCPs, skills, plugins); `c
 
 ## Install
 
-claude-i is currently a **private repository** — install paths require read access (be added as a collaborator, or have a PAT with `repo` scope).
-
 > Native Windows is not supported; use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install). The `claude-i` CLI emits `PLATFORM_ERROR=3` on `sys.platform == "win32"` (G9 platform guard, STORY-001.2).
 
-### Option 1 — pipx + git tag (recommended)
+### Option 1 — Homebrew (macOS / Linux, recommended)
 
 ```bash
-pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.2
+brew tap rafaelscosta/claude-i
+brew install claude-i
 ```
 
-Requires `gh auth login` or a `GH_TOKEN`/`GITHUB_TOKEN` env var with read access to the repo.
-
-### Option 2 — GitHub Release wheel
+### Option 2 — pipx + GitHub Release
 
 ```bash
 pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2-py3-none-any.whl
 ```
 
-### Option 3 — sdist (uv-compatible)
+### Option 3 — pipx + git tag
+
+```bash
+pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.2
+```
+
+### Option 4 — sdist (uv-compatible)
 
 ```bash
 pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2.tar.gz
-# or: uv tool install ...
+# or: uv tool install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2.tar.gz
 ```
+
+### PyPI (pending Trusted Publisher setup)
+
+The `publish.yml` workflow is wired for PyPI Trusted Publishing via OIDC. Once a Pending Publisher is registered at https://pypi.org/manage/account/publishing/, the next dispatch lands `claude-i` on PyPI and enables `pipx install claude-i` / `uv tool install claude-i` directly. See `NOTES.md` § "IP Status — Public Release" for the operator setup steps.
 
 ### Verify
 
@@ -105,20 +112,19 @@ claude-i reap                    # kill orphaned claude-i-* tmux sessions
 | 2 | Missing dependency or config error |
 | 3 | Unsupported platform (native Windows; use WSL2) |
 
-## Public Release (deferred)
+## Distribution Status
 
-The following paths land when the repo flips PUBLIC + PyPI Pending Publisher is configured:
+v0.2.2 (2026-05-19) is the first public release after the IP-lock reversal documented in `NOTES.md` § "IP Status — Public Release".
 
-- `pipx install claude-i` (PyPI)
-- `uv tool install claude-i` (PyPI)
-- `brew install rafaelscosta/claude-i/claude-i` (Homebrew tap)
-- `curl -fsSL https://raw.githubusercontent.com/rafaelscosta/claude-i/main/install.sh | sh`
+| Path | Status |
+|---|---|
+| Repository (PUBLIC) | ✓ active |
+| GitHub Release (wheel + sdist) | ✓ active |
+| Homebrew tap (`rafaelscosta/claude-i`) | ✓ active |
+| PyPI (`pip install claude-i`) | pending Trusted Publisher setup |
+| `install.sh` bootstrap (`curl | sh`) | available for local testing; canonical one-liner pending |
 
-See `NOTES.md` § "Private Distribution Phase" for the operator checklist to enable public release.
-
-### Bootstrap script (`install.sh`) — currently for local use
-
-The repo also ships `install.sh` at the root. While the repo is private, it is intended for local dev/testing (`--local <path>` mode using artifacts downloaded from a GitHub Release). Once public, it becomes the canonical one-liner via `curl | bash`. Documentation in [`docs/guides/homebrew-tap.md`](docs/guides/homebrew-tap.md).
+The `install.sh` script lives at the repo root and supports `--local <path>` mode using artifacts downloaded from a GitHub Release. See [`docs/guides/homebrew-tap.md`](docs/guides/homebrew-tap.md) for detailed bootstrap docs.
 
 ## Origin
 
