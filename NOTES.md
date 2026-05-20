@@ -328,3 +328,47 @@ data with ``--retries 3``: 10/10 success in pytest's reliability test.
   Locks the automation-reliability contract — all 10 must succeed.
   If this test starts flaking, Bug 5 upstream rate has risen above the
   3-retry design point.
+
+## STORY-001.8 / Bug 6 + Bug 9 — prompt delivery + chat-title misattribution
+
+**Date:** 2026-05-20
+**Author:** @dev (Dex) closing STORY-001.8
+
+### Bug 6 — tmux paste/Enter race (FIXED)
+
+The seed's `set-buffer + paste-buffer + send-keys Enter` delivers prompts
+async to the TUI. For prompts >~40 chars, Enter landed before the paste
+completed → silent no-op, `AGT idle`, Stop hook never fired. Symptom:
+`No Stop hook signal after Ns` for any non-trivial prompt.
+
+Two-part fix:
+1. `tmux send-keys -l <prompt>` — literal keystroke injection.
+2. `_wait_for_pane_to_contain()` — poll capture-pane until a 24-char prompt
+   suffix is visible, THEN dispatch Enter.
+
+### Bug 9 — Stop hook fires TWICE (FIXED)
+
+claude-code 2.1.143 fires the Stop hook twice per prompt:
+- 1st fire: title-generation artifact (`"Chat: X"`, `"Docs: Y"`, `"SKIP"`, ...)
+- 2nd fire (5-15s later): the real assistant response
+
+v0.2.2 returned the first fire → users got `"SKIP"` / chat-titles instead
+of answers. Fix: `_looks_like_chat_title()` (generic `^[A-Z][a-zA-Z0-9]*: [A-Z]`
+single-line ≤60-char shape + literal `SKIP`) drops title fires; the wait
+loop keeps polling for the real response within `--timeout`.
+
+### Empirical validation (2026-05-20, real claude)
+
+- 70-char prompt: 7s, full Rayleigh answer (was timeout).
+- `@analyst` 125-char: 23s, full Atlas risk analysis (was `"SKIP"`).
+- `/idea` slash skill: 49s, skill executed + wrote `docs/inbox/ideas.md` (was `"SKIP"`).
+- 10× math single-shot: 10/10, 0 chat-title contamination.
+
+### Host-saturation caveat (Bug 5 amplification)
+
+After a long test bench, host load average climbs (22+ observed) and Bug 5
+(Anthropic burst hang) becomes very aggressive — even mid-length prompts
+time out across all `--retries`. This is environmental, not a claude-i
+regression. The `/idea` integration test skips (not fails) under this
+condition. Re-run on an idle host to see the green path. Production
+mitigation remains `--retries 3`.

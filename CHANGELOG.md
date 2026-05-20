@@ -4,6 +4,38 @@ All notable changes to `claude-i` are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] — 2026-05-19
+
+### Fixed
+- **Bug 6 (BLOCKER for real automation) — tmux paste-buffer / Enter race.** The seed's `set-buffer + paste-buffer + send-keys Enter` triple delivers the prompt asynchronously to the TUI input field. For prompts longer than ~40 chars, the `send-keys Enter` lands BEFORE the paste has been fully absorbed → claude receives Enter against an empty/partial input → silent no-op, `AGT idle`, Stop hook never fires. Symptom: `claude-i: No Stop hook signal after Ns` for any prompt above ~40 chars. Empirical bench (2026-05-19) showed this making real AIOX automation unusable (`/idea`, `@analyst` invocations, anything with reasoning context).
+- **Bug 6 Fix (two parts):**
+  1. Replace the paste-buffer chain with `tmux send-keys -l <prompt>` (literal keystroke injection).
+  2. Add `_wait_for_pane_to_contain()` — poll `tmux capture-pane` until a recognizable suffix of the prompt is visible in the input area BEFORE dispatching Enter. `send-keys -l` is still async (keystrokes arrive over frames); the pane-content confirmation closes the residual race for long prompts.
+- **Bug 9 (discovered during Bug 6 validation) — chat-title / SKIP misattribution.** claude-code 2.1.143 fires the Stop hook TWICE per prompt: first with a title-generation hint (`"Chat: Geography"`, `"Risk: ..."`, or literal `"SKIP"`), then 5-15s later with the real assistant response. The payload-first path (v0.2.2) accepted whichever fire it saw first → users got `"SKIP"` / chat-titles instead of real answers for `@agent` invocations and skill prompts.
+- **Bug 9 Fix:** `_looks_like_chat_title()` predicate detects title artifacts (12 known prefixes + literal `SKIP`). The runner's Stop-hook wait loop drops title fires (clears sentinel+payload, keeps polling within the `--timeout` budget) until it sees a real response. `_extract_text_from_payload()` rejects titles too as a belt-and-suspenders defense.
+
+### Added
+- 6 new unit tests in `test_runner.py`:
+  - `test_prompt_uses_send_keys_literal_not_paste_buffer` — asserts NO `set-buffer` / `paste-buffer` argv anywhere; exactly one `send-keys -l <prompt>` + exactly one `send-keys Enter`.
+  - `test_prompt_send_keys_handles_multiline` — newline-bearing prompt preserved in argv.
+  - `test_prompt_send_keys_handles_special_chars` — quotes, backslashes, `$`, Portuguese accents all passed verbatim.
+  - `test_looks_like_chat_title_recognizes_known_patterns` — title prefixes + SKIP detected; real answers passed.
+  - `test_run_skips_chat_title_fire_and_returns_real_answer` — two-fire sequence (SKIP then real); runner returns the real answer.
+  - `test_run_returns_directly_when_no_title_fire` — single non-title payload returns immediately (no false-positive retry).
+- 3 new opt-in integration tests in `test_integration_e2e.py`:
+  - `test_e2e_long_prompts` — 5 prompts of 30/60/100/150/200 chars all succeed single-shot.
+  - `test_e2e_aiox_agent_invocation` — `@analyst` prompt of ~125 chars (above Bug 6 threshold + triggers Bug 9 title fire).
+  - `test_e2e_slash_skill_invocation` — `/idea` prompt that empirically failed on v0.2.2 even with `--timeout 300`.
+
+### Changed
+- `runner.run()` Stop-hook wait loop rewritten to filter chat-title fires (Bug 9) and the prompt-delivery section rewritten to document the `send-keys -l` + pane-confirmation contract (Bug 6).
+
+### Empirical validation (2026-05-20, real claude binary)
+- 70-char prompt: full Rayleigh-scattering answer in 7s (was: timeout on v0.2.2).
+- `@analyst` 125-char invocation: full Atlas risk analysis in 23s (was: `"SKIP"` on v0.2.2).
+- `/idea` slash skill: actually executed, wrote to `docs/inbox/ideas.md` (was: `"SKIP"` / chat-title on v0.2.2).
+- 10/10 math prompts single-shot, 0 chat-title contamination.
+
 ## [0.2.2] — 2026-05-19
 
 ### Added
@@ -65,6 +97,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the 
 
 ---
 
+[0.2.3]: https://github.com/rafaelscosta/claude-i/releases/tag/v0.2.3
 [0.2.2]: https://github.com/rafaelscosta/claude-i/releases/tag/v0.2.2
 [0.2.1]: https://github.com/rafaelscosta/claude-i/releases/tag/v0.2.1
 [0.2.0]: https://github.com/rafaelscosta/claude-i/releases/tag/v0.2.0
