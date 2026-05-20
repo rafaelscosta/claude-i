@@ -198,3 +198,161 @@ def test_e2e_reliability_with_retries() -> None:
             f"claude-i E2E reliability test (with --retries 3): "
             f"{len(failures)}/{_E2E_RELIABILITY_RUNS} runs failed.\n{report}"
         )
+
+
+# ---------------------------------------------------------------------------
+# STORY-001.8 / Bug 6 — long prompts + AIOX agent + slash skill
+# ---------------------------------------------------------------------------
+
+
+def _run_claude_i_with_prompt(
+    entrypoint: str, env: dict[str, str], prompt: str, retries: int = 0
+) -> subprocess.CompletedProcess[str]:
+    """Variant of _run_claude_i_once that takes an arbitrary prompt."""
+    args = [entrypoint, "--timeout", "120", "--ready-wait", "25"]
+    if retries > 0:
+        args.extend(["--retries", str(retries)])
+    args.append(prompt)
+    outer_timeout = 180 * (retries + 1)
+    return subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        timeout=outer_timeout,
+        env=env,
+    )
+
+
+def test_e2e_long_prompts() -> None:
+    """STORY-001.8 / AC-6 — prompts of varying length all succeed single-shot.
+
+    Bug 6 (tmux paste/Enter race) caused prompts longer than ~40 chars to
+    silently no-op on v0.2.2. After the send-keys -l fix, prompt length
+    becomes irrelevant. This test runs 5 prompts spanning 30 to 200 chars
+    with --retries 0 (no retry tolerance for Bug 5 — pure Bug 6 contract).
+    """
+    _skip_unless_runnable()
+    entrypoint = _claude_i_entrypoint()
+    env = os.environ.copy()
+    env["CLAUDE_I_AUTO_INSTALL_HOOK"] = "1"
+
+    prompts = [
+        # 30 chars — baseline that always worked.
+        "Say the single word PONG only.",
+        # ~60 chars — failed on v0.2.2.
+        "what is the capital of France and one fact about it pls",
+        # ~100 chars.
+        "Briefly: what color is the sky during the day and why does it appear that color to human eyes?",
+        # ~150 chars.
+        "Please list three short bullet points about why automated testing matters for software projects that ship to real users in production environments.",
+        # ~200 chars.
+        "Imagine you are a teacher explaining to a curious child: why do birds fly south for the winter, what helps them navigate over such long distances, and is there variation between species in this behavior?",
+    ]
+
+    failures: list[tuple[int, int, subprocess.CompletedProcess[str]]] = []
+    for i, prompt in enumerate(prompts, start=1):
+        result = _run_claude_i_with_prompt(entrypoint, env, prompt, retries=0)
+        if result.returncode != 0 or not result.stdout.strip():
+            failures.append((i, len(prompt), result))
+
+    if failures:
+        report = "\n\n".join(
+            f"--- failure {n} (prompt len={ln}, rc={r.returncode}) ---\n"
+            f"stdout: {r.stdout[:120]!r}\n"
+            f"stderr: {r.stderr[:300]}"
+            for n, ln, r in failures
+        )
+        raise AssertionError(
+            f"STORY-001.8 long-prompt contract: {len(failures)}/{len(prompts)} runs failed.\n{report}"
+        )
+
+
+def test_e2e_aiox_agent_invocation() -> None:
+    """STORY-001.8 / AC-7 — invoke an AIOX agent via a long prompt (~125 chars).
+
+    Validates that the Bug 6 fix unblocks real automation against the AIOX
+    ecosystem: agent invocations are typically long prompts that include the
+    @handle plus task context.
+    """
+    _skip_unless_runnable()
+    entrypoint = _claude_i_entrypoint()
+    env = os.environ.copy()
+    env["CLAUDE_I_AUTO_INSTALL_HOOK"] = "1"
+
+    prompt = (
+        "Como @analyst Atlas, suggest one specific risk for the claude-i "
+        "project's current dependency on Anthropic's Claude Code CLI."
+    )
+    assert len(prompt) > 60, "prompt must exceed Bug 6 empirical threshold"
+
+    result = _run_claude_i_with_prompt(entrypoint, env, prompt, retries=1)
+    assert result.returncode == 0, (
+        f"AIOX agent invocation failed:\nstderr: {result.stderr[:500]}"
+    )
+    assert result.stdout.strip(), (
+        f"AIOX agent invocation produced empty stdout: stderr={result.stderr[:300]}"
+    )
+
+
+def test_e2e_slash_skill_invocation() -> None:
+    """STORY-001.8 / AC-7b — slash skill invocation: Bug 6/9 regression guard.
+
+    Empirical bench Test 2b (2026-05-19) showed `/idea` returning chat-titles
+    or `"SKIP"` (Bug 9) and timing out (Bug 6) on v0.2.2. This test guards
+    those DETERMINISTIC regressions while TOLERATING the orthogonal,
+    environmental Bug 5 (Anthropic burst hang under host saturation).
+
+    Contract (same philosophy as test_e2e_single_shot_smoke):
+    - If the run succeeds: the output MUST NOT be a chat-title artifact
+      (Bug 9 regression) and MUST be non-empty.
+    - If the run fails with "No Stop hook signal" (Bug 5 burst hang —
+      observed when host load average is high, e.g. after a long test
+      bench): TOLERATE it, print an INFO note. This is not a claude-i
+      regression; it is the documented upstream limitation mitigated by
+      --retries in production.
+    - Any OTHER failure mode is a hard fail.
+
+    Manual isolated runs of this exact prompt succeed in ~49s and the skill
+    actually executes (writes to docs/inbox/ideas.md). The Bug 6 + Bug 9
+    fixes are validated deterministically by the unit tests and by
+    test_e2e_long_prompts / test_e2e_aiox_agent_invocation.
+    """
+    _skip_unless_runnable()
+    entrypoint = _claude_i_entrypoint()
+    env = os.environ.copy()
+    env["CLAUDE_I_AUTO_INSTALL_HOOK"] = "1"
+
+    prompt = "/idea anota: claude-i v0.2.3 reliability test 2026-05-20"
+    result = _run_claude_i_with_prompt(entrypoint, env, prompt, retries=3)
+
+    if result.returncode == 0:
+        out = result.stdout.strip()
+        assert out, "slash skill produced empty stdout on success"
+        # Bug 9 regression guard: a chat-title / SKIP must NEVER be the
+        # returned value. These are the exact artifacts the fix removes.
+        assert out != "SKIP", f"Bug 9 regression: returned 'SKIP' title; out={out!r}"
+        assert not (
+            len(out) <= 60
+            and "\n" not in out
+            and ": " in out
+            and out.split(": ", 1)[0].isalnum()
+            and out[0].isupper()
+        ), f"Bug 9 regression: returned a chat-title artifact; out={out!r}"
+        return
+
+    # returncode != 0 — tolerate Bug 5 burst hang only.
+    if "No Stop hook signal" in result.stderr:
+        print(
+            "\n[INFO] Slash skill hit Bug 5 (Anthropic burst hang under host "
+            "saturation). This is environmental, NOT a Bug 6/9 regression. "
+            "Manual isolated runs of this prompt succeed. Skipping the "
+            "success assertion.\n"
+            f"stderr tail: {result.stderr[-200:]}"
+        )
+        pytest.skip("Bug 5 burst hang (environmental) — see INFO above")
+
+    # Any other failure is a hard fail.
+    raise AssertionError(
+        f"Slash skill invocation failed with non-Bug-5 error:\n"
+        f"rc={result.returncode}\nstderr: {result.stderr[:500]}"
+    )
