@@ -98,6 +98,12 @@ def _drive_run_until_first_subprocess_call(
         "_wait_for_payload",
         lambda payload, timeout=0.0, interval=0.0: payload.exists(),
     )
+    # STORY-001.8 / Bug 6 — short-circuit pane-content polling in mocked tests.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_pane_to_contain",
+        lambda session, prompt, timeout=0.0, interval=0.0: True,
+    )
     # STORY-001.6 / Bug 4 — short-circuit transcript-retry deadline.
     monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
     # time.sleep should be a no-op so the test runs fast.
@@ -225,6 +231,12 @@ def test_sentinel_uses_mkstemp(monkeypatch: pytest.MonkeyPatch) -> None:
         "_wait_for_payload",
         lambda payload, timeout=0.0, interval=0.0: payload.exists(),
     )
+    # STORY-001.8 / Bug 6 — short-circuit pane-content polling in mocked tests.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_pane_to_contain",
+        lambda session, prompt, timeout=0.0, interval=0.0: True,
+    )
     # STORY-001.6 / Bug 4 — short-circuit transcript retry for test speed.
     monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
     monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
@@ -290,6 +302,12 @@ def test_cleanup_registered_after_session_start(
         runner,
         "_wait_for_payload",
         lambda payload, timeout=0.0, interval=0.0: payload.exists(),
+    )
+    # STORY-001.8 / Bug 6 — short-circuit pane-content polling in mocked tests.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_pane_to_contain",
+        lambda session, prompt, timeout=0.0, interval=0.0: True,
     )
     # STORY-001.6 / Bug 4 — short-circuit transcript retry for test speed.
     monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
@@ -371,6 +389,12 @@ def _stub_runner_io(
         runner,
         "_wait_for_payload",
         lambda payload, timeout=0.0, interval=0.0: payload.exists(),
+    )
+    # STORY-001.8 / Bug 6 — short-circuit pane-content polling in mocked tests.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_pane_to_contain",
+        lambda session, prompt, timeout=0.0, interval=0.0: True,
     )
     # STORY-001.6 / Bug 4 — neutralize the transcript-retry deadline in tests
     # so Branch 2 ("no assistant message") raises immediately without burning
@@ -891,6 +915,12 @@ def test_payload_last_assistant_message_preferred_over_transcript(
         "_wait_for_payload",
         lambda payload, timeout=0.0, interval=0.0: payload.exists(),
     )
+    # STORY-001.8 / Bug 6 — short-circuit pane-content polling in mocked tests.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_pane_to_contain",
+        lambda session, prompt, timeout=0.0, interval=0.0: True,
+    )
     monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
     monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
     monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _s: None)
@@ -960,6 +990,12 @@ def test_transcript_fallback_still_works_when_payload_field_absent(
         "_wait_for_payload",
         lambda payload, timeout=0.0, interval=0.0: payload.exists(),
     )
+    # STORY-001.8 / Bug 6 — short-circuit pane-content polling in mocked tests.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_pane_to_contain",
+        lambda session, prompt, timeout=0.0, interval=0.0: True,
+    )
     monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
     monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
     monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _s: None)
@@ -971,3 +1007,309 @@ def test_transcript_fallback_still_works_when_payload_field_absent(
     assert text == "fallback-OK", (
         f"transcript fallback must produce text when payload field absent; got {text!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# STORY-001.8 / Bug 6 — send-keys -l replaces paste-buffer for prompt delivery
+# ---------------------------------------------------------------------------
+
+
+def _capture_all_subprocess_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, dict[str, Any]]]:
+    """Capture every ``subprocess.run`` call for full sequence assertions.
+
+    Differs from ``_make_subprocess_capture`` which only records the FIRST
+    call. STORY-001.8 unit tests need to assert on the prompt-delivery calls
+    that happen AFTER new-session.
+    """
+    calls: list[tuple[Any, dict[str, Any]]] = []
+
+    def fake_run(*args: Any, **kwargs: Any) -> MagicMock:
+        calls.append((args, kwargs))
+        result = MagicMock()
+        result.stdout = ""
+        result.stderr = ""
+        result.returncode = 0
+        return result
+
+    monkeypatch.setattr(runner, "subprocess", MagicMock(run=MagicMock(side_effect=fake_run)))
+    return calls
+
+
+def _drive_run_capturing_all(
+    monkeypatch: pytest.MonkeyPatch, prompt: str
+) -> list[tuple[Any, dict[str, Any]]]:
+    """Drive ``runner.run`` to completion-or-error and return all subprocess calls."""
+    calls = _capture_all_subprocess_calls(monkeypatch)
+    monkeypatch.setattr(runner.Path, "exists", lambda self: True)
+    monkeypatch.setattr(
+        runner.Path,
+        "read_text",
+        lambda self, *args, **kwargs: '{"transcript_path": "/tmp/dne", "last_assistant_message": "ok"}',
+    )
+    monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    monkeypatch.setattr(
+        runner.Path,
+        "stat",
+        lambda self, *a, **kw: type("_FakeStat", (), {"st_size": 42})(),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_payload",
+        lambda payload, timeout=0.0, interval=0.0: payload.exists(),
+    )
+    # STORY-001.8 / Bug 6 — short-circuit pane-content polling in mocked tests.
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_pane_to_contain",
+        lambda session, prompt, timeout=0.0, interval=0.0: True,
+    )
+    monkeypatch.setattr(runner, "_TRANSCRIPT_RETRY_SECONDS", 0.0)
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _s: None)
+    monkeypatch.setattr(runner, "_cleanup_stale_sentinels", lambda: None)
+
+    try:
+        runner.run(prompt=prompt, extra_args=[], verbose=False, ready_wait=0.0, timeout=1)
+    except RuntimeError:
+        pass
+    return calls
+
+
+def test_prompt_uses_send_keys_literal_not_paste_buffer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """STORY-001.8 — prompt delivery uses send-keys -l, NOT set-buffer/paste-buffer.
+
+    Asserts:
+    1. NO subprocess.run call contains the argv "set-buffer".
+    2. NO subprocess.run call contains the argv "paste-buffer".
+    3. EXACTLY ONE call contains both "send-keys" and the literal prompt
+       string with the "-l" flag.
+    4. EXACTLY ONE call contains "send-keys" + "Enter" (the submit).
+    """
+    prompt = "What is the capital of France and one fact about it pls"
+    calls = _drive_run_capturing_all(monkeypatch, prompt)
+
+    all_argvs = [
+        call_args[0] if call_args else None for call_args, _kwargs in calls
+    ]
+    flat = [tuple(argv) for argv in all_argvs if isinstance(argv, list)]
+
+    set_buffer_calls = [t for t in flat if "set-buffer" in t]
+    paste_buffer_calls = [t for t in flat if "paste-buffer" in t]
+    literal_send_keys = [t for t in flat if "send-keys" in t and "-l" in t and prompt in t]
+    enter_send_keys = [t for t in flat if "send-keys" in t and "Enter" in t]
+
+    assert set_buffer_calls == [], (
+        f"Bug 6 regression: set-buffer must NOT be called for prompt delivery; got {set_buffer_calls}"
+    )
+    assert paste_buffer_calls == [], (
+        f"Bug 6 regression: paste-buffer must NOT be called for prompt delivery; got {paste_buffer_calls}"
+    )
+    assert len(literal_send_keys) == 1, (
+        f"Bug 6 fix: expected exactly one 'send-keys -l <prompt>' call; got {len(literal_send_keys)}: {literal_send_keys}"
+    )
+    assert len(enter_send_keys) == 1, (
+        f"Bug 6 fix: expected exactly one 'send-keys Enter' submit; got {len(enter_send_keys)}: {enter_send_keys}"
+    )
+
+
+def test_prompt_send_keys_handles_multiline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multi-line prompt arrives verbatim through send-keys -l.
+
+    The TUI's input field supports multi-line input, so a newline-bearing
+    prompt should be delivered as a single send-keys -l call with the
+    literal newline preserved in the argv string.
+    """
+    multiline_prompt = "first line of prompt\nsecond line with content"
+    calls = _drive_run_capturing_all(monkeypatch, multiline_prompt)
+
+    all_argvs = [
+        tuple(call_args[0]) for call_args, _kwargs in calls
+        if call_args and isinstance(call_args[0], list)
+    ]
+    literal_calls = [t for t in all_argvs if "send-keys" in t and "-l" in t]
+
+    assert len(literal_calls) == 1
+    assert any(multiline_prompt == arg for arg in literal_calls[0]), (
+        f"Multi-line prompt not preserved in argv; got: {literal_calls[0]}"
+    )
+
+
+def test_prompt_send_keys_handles_special_chars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Special chars (quotes, backslashes, $, accents) pass verbatim.
+
+    The send-keys -l argument is NOT shell-interpreted by tmux — the -l flag
+    treats the value as literal byte injection. The runner passes the raw
+    string directly as the argv element, so no shlex.quote is needed for
+    the prompt delivery itself.
+    """
+    # Mix of quoted phrases, backslash, dollar, double quotes, Portuguese accents.
+    tricky_prompt = "echo 'hi there' \\$VAR ção é \"quoted\""
+    calls = _drive_run_capturing_all(monkeypatch, tricky_prompt)
+
+    all_argvs = [
+        tuple(call_args[0]) for call_args, _kwargs in calls
+        if call_args and isinstance(call_args[0], list)
+    ]
+    literal_calls = [t for t in all_argvs if "send-keys" in t and "-l" in t]
+
+    assert len(literal_calls) == 1
+    assert any(tricky_prompt == arg for arg in literal_calls[0]), (
+        f"Special-char prompt not preserved verbatim; got: {literal_calls[0]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# STORY-001.8 / Bug 9 — chat-title generation filter
+# ---------------------------------------------------------------------------
+
+
+def test_looks_like_chat_title_recognizes_known_patterns() -> None:
+    """STORY-001.8 / Bug 9 — title patterns detected, real answers passed."""
+    titles = [
+        "Chat: Geography",
+        "Test: Math Question",
+        "Research: Runner.py",
+        "Risk: Claude-i Dependencies",
+        "Note: Something",
+        "Idea: A New Feature",
+        "Question: Why Sky Blue",
+        "Task: Refactor",
+        "Topic: Architecture",
+        "Review: PR 42",
+        "Analysis: Bottleneck",
+        "Docs: Isolated Test Notes",  # observed prefix outside any fixed list
+        "SKIP",
+    ]
+    for t in titles:
+        assert runner._looks_like_chat_title(t) is True, f"{t!r} should be a title"
+
+    real_answers = [
+        "4",
+        "Paris.",
+        "Maçã.",
+        "PONG",
+        "The sky is blue due to Rayleigh scattering.",
+        "**Atlas — Risk Assessment:**\n\nThe main risk is...",
+        # Edge: colon present but NOT in leading "Word: " position.
+        "Here is the answer: 42",
+        "Paris. Fun fact: the Eiffel Tower grows in summer.",
+        # Edge: lowercase prefix should NOT match (titles are capitalized).
+        "chat: this is lowercase so not a title",
+        # Edge: multi-line answer (newline present) — never a title.
+        "Question: Why?\nBecause of physics.",
+        # Edge: "Word: Title" shape but LONGER than the 60-char cap.
+        "Summary: this is a very long sentence that exceeds the sixty char cap easily",
+    ]
+    for a in real_answers:
+        assert runner._looks_like_chat_title(a) is False, f"{a!r} should NOT be a title"
+
+
+def test_extract_text_from_payload_rejects_chat_title() -> None:
+    """``_extract_text_from_payload`` returns (\"\", False) for title artifacts."""
+    text, came = runner._extract_text_from_payload(
+        {"last_assistant_message": "SKIP"}
+    )
+    assert (text, came) == ("", False)
+
+    text, came = runner._extract_text_from_payload(
+        {"last_assistant_message": "Chat: Geography"}
+    )
+    assert (text, came) == ("", False)
+
+    # Real answer still extracted.
+    text, came = runner._extract_text_from_payload(
+        {"last_assistant_message": "Paris."}
+    )
+    assert (text, came) == ("Paris.", True)
+
+
+def test_run_skips_chat_title_fire_and_returns_real_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """STORY-001.8 / Bug 9 — runner waits past the title fire for the real answer.
+
+    Simulates the two-Stop-hook sequence: first payload read returns a
+    title ("SKIP"), second read returns the real answer. The runner must
+    loop past the title and return the real answer.
+    """
+    sub_mock, _captured = _make_subprocess_capture()
+    monkeypatch.setattr(runner, "subprocess", MagicMock(run=sub_mock))
+    monkeypatch.setattr(runner.Path, "exists", lambda self: True)
+
+    # read_text returns title first, real answer second.
+    payload_reads = {"n": 0}
+
+    def fake_read_text(self: Any, *args: Any, **kwargs: Any) -> str:
+        s = str(self)
+        if s.endswith(".json"):
+            payload_reads["n"] += 1
+            if payload_reads["n"] == 1:
+                return '{"last_assistant_message": "SKIP"}'
+            return '{"last_assistant_message": "the real answer"}'
+        return ""
+
+    monkeypatch.setattr(runner.Path, "read_text", fake_read_text)
+    monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    monkeypatch.setattr(
+        runner.Path,
+        "stat",
+        lambda self, *a, **kw: type("_FakeStat", (), {"st_size": 42})(),
+    )
+    monkeypatch.setattr(
+        runner, "_wait_for_payload", lambda payload, timeout=0.0, interval=0.0: True
+    )
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_pane_to_contain",
+        lambda session, prompt, timeout=0.0, interval=0.0: True,
+    )
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _s: None)
+    monkeypatch.setattr(runner, "_cleanup_stale_sentinels", lambda: None)
+
+    text, _metadata = runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=10)
+    assert text == "the real answer", (
+        f"runner must skip the SKIP title fire and return the real answer; got {text!r}"
+    )
+    assert payload_reads["n"] >= 2, "runner must read the payload at least twice (title then real)"
+
+
+def test_run_returns_directly_when_no_title_fire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No false-positive retry: a single non-title payload returns immediately."""
+    sub_mock, _captured = _make_subprocess_capture()
+    monkeypatch.setattr(runner, "subprocess", MagicMock(run=sub_mock))
+    monkeypatch.setattr(runner.Path, "exists", lambda self: True)
+    monkeypatch.setattr(
+        runner.Path,
+        "read_text",
+        lambda self, *a, **kw: '{"last_assistant_message": "42"}'
+        if str(self).endswith(".json") else "",
+    )
+    monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
+    monkeypatch.setattr(
+        runner.Path,
+        "stat",
+        lambda self, *a, **kw: type("_FakeStat", (), {"st_size": 42})(),
+    )
+    monkeypatch.setattr(
+        runner, "_wait_for_payload", lambda payload, timeout=0.0, interval=0.0: True
+    )
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_pane_to_contain",
+        lambda session, prompt, timeout=0.0, interval=0.0: True,
+    )
+    monkeypatch.setattr(runner.time, "sleep", lambda *_a, **_kw: None)
+    monkeypatch.setattr(runner.reaper, "register_cleanup", lambda _s: None)
+    monkeypatch.setattr(runner, "_cleanup_stale_sentinels", lambda: None)
+
+    text, _metadata = runner.run("hi", [], verbose=False, ready_wait=0.0, timeout=10)
+    assert text == "42"

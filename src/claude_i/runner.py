@@ -212,6 +212,69 @@ _TRANSCRIPT_RETRY_SECONDS: float = 10.0
 _TRANSCRIPT_POLL_INTERVAL: float = 0.2
 
 
+#: Literal strings claude-code emits on the title pass for prompts that
+#: do not lend themselves to a title (e.g. literal "SKIP" for very short
+#: math answers, "PONG"-style replies in some sessions).
+_CHAT_TITLE_LITERALS: frozenset[str] = frozenset({"SKIP"})
+
+#: STORY-001.8 / Bug 9 — generic chat-title shape. claude-code 2.1.143 fires
+#: the Stop hook TWICE per prompt: once with a title-generation artifact and
+#: once with the real response. Titles follow a stable shape:
+#:   ``<CapitalizedWord>: <Title Case short phrase>``
+#: on a SINGLE line. Observed prefixes are open-ended ("Chat:", "Test:",
+#: "Research:", "Risk:", "Docs:", "Analysis:", ...) so a fixed prefix list is
+#: whack-a-mole. Instead we match the generic shape with two guards that keep
+#: false positives near-zero:
+#:   1. single line (no newline) — real multi-paragraph answers have newlines
+#:   2. short (<= 60 chars) — titles are terse; real answers rarely are AND
+#:      rarely start with "Word: ".
+#: The leading token is a single capitalized word followed by ": " and then a
+#: capital letter (Title Case). Real answers like "Paris. Fun fact: ..." do
+#: not match (they don't START with "Word: "). Markdown answers like
+#: "**Atlas ..." do not match (start with "*", not a capital letter).
+_CHAT_TITLE_RE = re.compile(r"^[A-Z][a-zA-Z0-9]*: [A-Z][^\n]*$")
+_CHAT_TITLE_MAX_LEN: int = 60
+
+
+def _looks_like_chat_title(text: str) -> bool:
+    """Return True when ``text`` is a claude-code title-generation artifact.
+
+    STORY-001.8 / Bug 9 — discovered 2026-05-19 via empirical multi-Stop-hook
+    observation. claude-code 2.1.143 fires the Stop hook TWICE per prompt:
+    once with a chat-title hint (or literal ``"SKIP"``) and once with the
+    actual response. The payload-first path must filter the title fire to
+    return the real assistant response.
+
+    Title examples observed empirically (2026-05-19/20):
+    ``"SKIP"``, ``"Chat: Geography"``, ``"Test: Math Question"``,
+    ``"Risk: Claude-i Dependencies"``, ``"Research: Runner.py"``,
+    ``"Docs: Isolated Test Notes"``, ``"Risk: Claude-i Dependencies"``.
+
+    Real responses that must NOT match: ``"4"``, ``"Paris."``, ``"Maçã."``,
+    ``"PONG"``, ``"Paris. Fun fact: the Eiffel Tower ..."`` (colon present but
+    not in "Word: " leading position), ``"**Atlas — Risk: ..."`` (markdown),
+    multi-line answers (newline present).
+
+    Detection: literal SKIP, OR the generic ``<Word>: <Title>`` single-line
+    shape under ``_CHAT_TITLE_MAX_LEN`` chars. The predicate errs toward
+    recall — a false positive costs one extra Stop-hook wait, not data loss
+    (the next fire brings the real answer or the same title; the transcript
+    fallback still eventually returns the right answer).
+    """
+    if text in _CHAT_TITLE_LITERALS:
+        return True
+    if len(text) > _CHAT_TITLE_MAX_LEN:
+        return False
+    return bool(_CHAT_TITLE_RE.match(text))
+
+
+#: How long to wait for the SECOND Stop hook fire when the FIRST one
+#: was a chat-title. claude-code 2.1.143 has been observed firing the
+#: real-response Stop hook 5-15s after the title fire; 30s is generous
+#: cap to absorb burst-load slowness without starving genuine timeouts.
+_CHAT_TITLE_RETRY_SECONDS: float = 30.0
+
+
 def _extract_text_from_payload(hook_input: dict[str, object]) -> tuple[str, bool]:
     """Return the assistant response from ``payload["last_assistant_message"]``.
 
@@ -238,6 +301,9 @@ def _extract_text_from_payload(hook_input: dict[str, object]) -> tuple[str, bool
     """
     value = hook_input.get("last_assistant_message")
     if isinstance(value, str) and value:
+        # STORY-001.8 / Bug 9 — filter chat-title generation artifacts.
+        if _looks_like_chat_title(value):
+            return "", False
         return value, True
     return "", False
 
@@ -265,6 +331,71 @@ def _read_last_assistant_from_transcript(
         if msg.get("message", {}).get("role") == "assistant":
             last = msg["message"]
     return last
+
+
+#: STORY-001.8 / Bug 6 — pane-content confirmation poll defaults.
+#:
+#: After ``send-keys -l <prompt>``, the prompt keystrokes flow into the TUI
+#: asynchronously. We poll ``tmux capture-pane`` until the prompt is visibly
+#: present, then dispatch Enter. ``timeout`` caps the wait; in production
+#: observation, even long prompts arrive in <200ms.
+_PROMPT_VISIBLE_TIMEOUT: float = 10.0
+_PROMPT_VISIBLE_INTERVAL: float = 0.05
+#: How many trailing characters of the prompt must appear in the pane to
+#: confirm landing. Suffix-match (vs full-match) is robust to:
+#:   - TUI line wrapping (long prompts wrap; full-string match fails on
+#:     wrapped output even when the prompt is present).
+#:   - Newlines in the prompt (each line rendered separately).
+#:   - Leading whitespace stripping by some terminals.
+#: 24 chars is enough to be confident the full prompt arrived without
+#: requiring the full match. For prompts shorter than 24 chars, the helper
+#: uses the entire prompt as the suffix.
+_PROMPT_VISIBLE_SUFFIX_LEN: int = 24
+
+
+def _wait_for_pane_to_contain(
+    session: str,
+    prompt: str,
+    timeout: float = _PROMPT_VISIBLE_TIMEOUT,
+    interval: float = _PROMPT_VISIBLE_INTERVAL,
+) -> bool:
+    """Block until a recognizable suffix of ``prompt`` appears in the tmux pane.
+
+    STORY-001.8 / Bug 6 — companion to the ``send-keys -l`` prompt delivery.
+    Returns True when the prompt's trailing ``_PROMPT_VISIBLE_SUFFIX_LEN``
+    characters are observed via ``tmux capture-pane``, False on timeout.
+
+    Why suffix-matching: ``tmux capture-pane`` returns the pane content with
+    line wrapping applied by the terminal renderer. A 100-char prompt may
+    show across 2-3 visual rows separated by spaces — a substring match on
+    the full prompt fails even when the prompt is fully present. The
+    trailing N chars (after the last newline in the prompt, if any) are
+    almost always rendered on one row, so a substring match on those is
+    reliable.
+
+    Best-effort: returns False on timeout but does NOT raise. The caller
+    (``runner.run``) treats False as "submit anyway and hope for the best"
+    — the orthogonal Bug 5 retry safety net still applies if the submit
+    silently failed.
+    """
+    if not prompt:
+        return True
+    # Use the last logical line of the prompt for suffix matching — multiline
+    # prompts render the lines separately and we only need to confirm the last
+    # one landed (the others necessarily landed before).
+    last_line = prompt.splitlines()[-1] if "\n" in prompt else prompt
+    needle = last_line[-_PROMPT_VISIBLE_SUFFIX_LEN:] if len(last_line) > _PROMPT_VISIBLE_SUFFIX_LEN else last_line
+    if timeout <= 0:
+        result = tmux("capture-pane", "-pt", session, check=False)
+        return needle in result.stdout
+    deadline = time.monotonic() + timeout
+    while True:
+        result = tmux("capture-pane", "-pt", session, check=False)
+        if needle in result.stdout:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
 
 
 def _wait_for_payload(
@@ -570,48 +701,90 @@ def run(
                 file=sys.stderr,
             )
 
-        # Paste the prompt (multiline-safe) and submit.
-        tmux("set-buffer", "-b", session, prompt)
-        tmux("paste-buffer", "-t", session, "-b", session)
+        # STORY-001.8 / Bug 6 — Deliver the prompt via ``send-keys -l`` + a
+        # pane-content confirmation poll + ``send-keys Enter``. Together these
+        # three steps eliminate the paste/Enter race that made any prompt
+        # longer than ~40 chars silently no-op on v0.2.2.
+        #
+        # The seed's paste-buffer mechanism is asynchronous from the TUI's
+        # point of view: bytes flow into ``claude``'s input field over multiple
+        # frames. ``send-keys -l`` improves on paste-buffer because each
+        # character is a discrete keystroke event, but it is STILL async — for
+        # long prompts the final keystroke can arrive at the input field after
+        # ``send-keys Enter`` is dispatched. Result: Enter is interpreted
+        # against a partial buffer → silent no-op, claude stays ``AGT idle``,
+        # Stop hook never fires.
+        #
+        # Defense: ``_wait_for_pane_to_contain`` polls ``tmux capture-pane``
+        # until a recognizable suffix of the prompt appears inside the input
+        # area. Only then do we dispatch Enter. The suffix-matching strategy
+        # is robust against TUI wrapping (long prompts get visually wrapped
+        # across multiple display rows) — we just need to see the last few
+        # chars on screen, which proves the full prompt landed in the input
+        # field.
+        tmux("send-keys", "-t", session, "-l", prompt)
+        _wait_for_pane_to_contain(session, prompt, timeout=10.0)
         tmux("send-keys", "-t", session, "Enter")
 
-        # Wait for Stop hook.
+        # STORY-001.8 / Bug 9 — Wait for the Stop hook + filter chat-title
+        # generation fires. claude-code 2.1.143 fires the Stop hook TWICE
+        # per prompt: once with a title hint (``"Chat: X"``, ``"SKIP"``,
+        # etc.) and once with the real response. We loop until we see a
+        # NON-title payload or the user-supplied ``timeout`` is exhausted.
         deadline = time.time() + timeout
-        while not sentinel.exists():
-            if time.time() > deadline:
-                raise TimeoutError(
-                    f"No Stop hook signal after {timeout}s. Likely causes:\n"
-                    f"  - Hook not yet active (run `claude` once, /hooks, acknowledge)\n"
-                    f"  - TUI never received the prompt (try --ready-wait 8)\n"
-                    f"  - Re-run with --verbose to watch the tmux pane"
-                )
-            time.sleep(0.3)
+        hook_input: dict[str, object] | None = None
+        title_fires_observed = 0
+        while True:
+            # Wait for sentinel to be touched.
+            while not sentinel.exists():
+                if time.time() > deadline:
+                    raise TimeoutError(
+                        f"No Stop hook signal after {timeout}s. Likely causes:\n"
+                        f"  - Hook not yet active (run `claude` once, /hooks, acknowledge)\n"
+                        f"  - TUI never received the prompt (try --ready-wait 8)\n"
+                        f"  - Re-run with --verbose to watch the tmux pane"
+                    )
+                time.sleep(0.3)
 
-        # G8 — Branch 3: payload file never written. Replaces the seed's
-        # fake-success return that printed an error string as if the run
-        # had succeeded (then exit 0). RuntimeError signals failure to the
-        # caller, which translates to RUNTIME_ERROR.
-        #
-        # STORY-001.6 / Bug 1 — the v0.2.0 form raised here immediately when
-        # ``payload.exists()`` was False at the instant the sentinel was
-        # observed, even though the payload often arrived microseconds
-        # later (touch/cat race). The v0.2.1 atomic-rename HOOK_CMD makes
-        # the race impossible, but we keep a 2s polling grace as
-        # defense-in-depth for filesystems with non-zero cross-process
-        # stat() lag and to absorb any future hook-script regression.
-        if not _wait_for_payload(payload):
-            raise RuntimeError("hook fired but no payload written")
-        # STORY-001.6 / Bug 1 / Branch 3b — empty payload guard. The
-        # atomic-rename HOOK_CMD only commits the rename after the cat
-        # succeeds, so a 0-byte payload should be impossible there. But
-        # if a user has a legacy hook AND the rare race scenario where
-        # cat exits 0 with no stdin, the JSON parser below would raise
-        # JSONDecodeError which cli.main does NOT catch (only RuntimeError
-        # + TimeoutError). Raise a friendly RuntimeError here so users
-        # see a clean error message instead of a stack trace.
-        if payload.stat().st_size == 0:
-            raise RuntimeError("hook fired but payload empty")
-        hook_input = json.loads(payload.read_text())
+            # G8 — Branch 3: payload file never written.
+            # STORY-001.6 / Bug 1 — 2s grace via _wait_for_payload.
+            if not _wait_for_payload(payload):
+                raise RuntimeError("hook fired but no payload written")
+            # STORY-001.6 / Branch 3b — empty payload guard.
+            if payload.stat().st_size == 0:
+                raise RuntimeError("hook fired but payload empty")
+
+            candidate = json.loads(payload.read_text())
+            candidate_msg = candidate.get("last_assistant_message")
+            if isinstance(candidate_msg, str) and _looks_like_chat_title(candidate_msg):
+                # STORY-001.8 / Bug 9 — title fire. Clear sentinel+payload
+                # and continue polling for the next Stop hook. The
+                # remaining ``timeout`` budget covers both the current and
+                # the upcoming real-response fire.
+                title_fires_observed += 1
+                # Reset sentinel + payload so the inner while-loop blocks
+                # again until claude-code re-touches them.
+                for p in (sentinel, payload):
+                    try:
+                        p.unlink()
+                    except FileNotFoundError:
+                        pass
+                # Cap how long we tolerate consecutive title fires. After
+                # _CHAT_TITLE_RETRY_SECONDS without seeing a real response,
+                # fall through with what we have (the title) — better to
+                # surface a bizarre but real value than to spin forever.
+                if title_fires_observed * _CHAT_TITLE_RETRY_SECONDS > _CHAT_TITLE_RETRY_SECONDS * 2:
+                    hook_input = candidate
+                    break
+                continue
+
+            hook_input = candidate
+            break
+
+        # The loop only exits via ``break`` with ``hook_input`` set (or by
+        # raising). This assert narrows the type for mypy and documents the
+        # invariant.
+        assert hook_input is not None
 
         # Task 6.4 — extract optional cost/token metrics from the hook
         # payload. Field names follow the upstream Stop hook contract; when
@@ -620,13 +793,10 @@ def run(
         metadata = _build_metadata(start_time, hook_input)
 
         # STORY-001.7 / Bug 4 ELIMINATION — payload-first response extraction.
-        #
-        # Claude Code 2.1.143+ writes the full final assistant response to
-        # ``last_assistant_message`` in the Stop hook payload. When present,
-        # use it directly and skip the transcript entirely. This bypasses
-        # both Bug 4a (assistant message not flushed to JSONL yet) and Bug
-        # 4b (transcript file referenced by transcript_path never exists on
-        # disk — observed in ~60% of test runs during STORY-001.7 diagnosis).
+        # STORY-001.8 / Bug 9 — _extract_text_from_payload also filters
+        # title patterns as a belt-and-suspenders defense; the wait loop
+        # above already drops them but the helper rejecting titles makes
+        # the contract obvious at the call site.
         text_from_payload, came_from_payload = _extract_text_from_payload(hook_input)
         if came_from_payload:
             return text_from_payload, metadata
@@ -635,7 +805,7 @@ def run(
         # ``last_assistant_message``. Parse the transcript JSONL the v0.2.1
         # way (with Bug 4 retry as defense-in-depth) to preserve backwards
         # compatibility and the verified-empty branch semantics.
-        transcript = Path(hook_input.get("transcript_path", ""))
+        transcript = Path(str(hook_input.get("transcript_path", "")))
         # G8 — Branch 4: transcript path missing.
         #
         # STORY-001.6 / Bug 4 mitigation (still relevant on the fallback
