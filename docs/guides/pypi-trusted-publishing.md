@@ -19,8 +19,9 @@ the `publish.yml` workflow can be triggered manually via
 1. PyPI account at https://pypi.org (must be the same account that will own
    the `claude-i` project on PyPI).
 2. GitHub repository admin on `rafaelscosta/claude-i`.
-3. `claude-i` package name available on PyPI (verified 2026-05-18: 404, name
-   is free).
+3. `claude-i` package name available on PyPI. The project endpoint still
+   returned 404 during the v0.2.3 release-surface sync, so the first PyPI
+   publish should register the project.
 
 ---
 
@@ -71,12 +72,13 @@ access to `main` could trigger a publish.
 
 After Steps 1 and 2 are complete:
 
-1. Ensure `main` is up to date with the version bump commit
-   (`version = "0.2.0"` in `pyproject.toml`).
+1. Ensure `main` is up to date with the intended release version
+   (`version = "0.2.3"` in `pyproject.toml` for the current public release).
 2. Trigger the workflow manually:
 
    ```bash
-   gh workflow run publish.yml --ref main
+   gh workflow run publish.yml --ref v0.2.3 \
+     --field confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE
    ```
 
 3. Approve the deployment in the GitHub UI when prompted (the required
@@ -102,11 +104,11 @@ After the publish succeeds:
 ```bash
 # pipx
 pipx install claude-i
-claude-i --version  # → claude-i 0.2.0
+claude-i --version  # → claude-i 0.2.3
 
 # uv tool
 uv tool install claude-i
-claude-i --version  # → claude-i 0.2.0
+claude-i --version  # → claude-i 0.2.3
 ```
 
 ---
@@ -126,7 +128,7 @@ For a dry-run against TestPyPI before going to production PyPI:
    pipx install --index-url https://test.pypi.org/simple/ claude-i
    ```
 
-TestPyPI validation is NOT required for the 0.2.0 release — local
+TestPyPI validation is not required for the current release path — local
 `pipx install dist/*.whl` and `uv tool install dist/*.whl` smoke tests
 (documented in STORY-001.3) provide equivalent coverage.
 
@@ -143,8 +145,8 @@ activation):
    the tag and the GitHub Release before re-attempting:
 
    ```bash
-   git push --delete origin v0.2.0
-   gh release delete v0.2.0 --yes
+   git push --delete origin v0.2.3
+   gh release delete v0.2.3 --yes
    ```
 
    PyPI will not accept a re-upload of the same version-filename combination.

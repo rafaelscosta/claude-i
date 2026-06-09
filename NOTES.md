@@ -239,22 +239,23 @@ same tarball content).
 
 ## IP Status — Public Release (effective 2026-05-19)
 
-**Decision (operator, 2026-05-19):** IP-lock REVERSED. claude-i is published publicly with v0.2.2.
+**Decision (operator, 2026-05-19):** IP-lock REVERSED. claude-i is published publicly.
 - Repository: PUBLIC (flipped 2026-05-19)
 - PyPI publication: AUTHORIZED but DEFERRED — pending Trusted Publisher setup on pypi.org
-- Public Homebrew formula: AUTHORIZED — `rafaelscosta/homebrew-claude-i` formula updated to canonical v0.2.2 GitHub Release artifact
+- Current public release: v0.2.3 (2026-05-20)
+- Public Homebrew formula: AUTHORIZED — `rafaelscosta/homebrew-claude-i` formula updated to canonical v0.2.3 GitHub Release artifact
 
-**Rationale for reversal:** v0.2.2 reached production-ready automation reliability (STORY-001.7 closed; 10/10 reliability test with `--retries 3`). Bug 1/2/3 fixed, Bug 4 eliminated, Bug 5 mitigated. The IP-protection rationale from 2026-05-18 (preserving leverage during development) no longer applies once the product is stable and useful.
+**Rationale for reversal:** v0.2.2 reached production-ready automation reliability (STORY-001.7 closed; 10/10 reliability test with `--retries 3`). v0.2.3 then fixed the long-prompt paste/Enter race and chat-title/SKIP misattribution discovered in real AIOX prompt use (STORY-001.8). The IP-protection rationale from 2026-05-18 (preserving leverage during development) no longer applies once the product is stable and useful.
 
 **Public distribution paths now active:**
 - `brew install rafaelscosta/claude-i/claude-i` (Homebrew tap — fetches GitHub Release tarball)
-- `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2-py3-none-any.whl` (GitHub Release)
-- `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2.tar.gz` (GitHub Release sdist)
-- `pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.2` (git tag)
+- `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3-py3-none-any.whl` (GitHub Release)
+- `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3.tar.gz` (GitHub Release sdist)
+- `pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.3` (git tag)
 
 **PyPI publication — deferred (operator action required):**
 
-The `publish.yml` workflow is wired for Trusted Publishing via OIDC. PyPI rejected the v0.2.2 dispatch with `invalid-publisher` because no Trusted Publisher is registered for the project yet. Operator setup steps:
+The `publish.yml` workflow is wired for Trusted Publishing via OIDC. PyPI rejected the prior v0.2.2 dispatch with `invalid-publisher` because no Trusted Publisher was registered for the project. As of the v0.2.3 release-surface sync, PyPI still returns 404 for `claude-i`; publish the current version when the operator setup is complete. Operator setup steps:
 
 1. Create / log into PyPI account.
 2. Visit https://pypi.org/manage/account/publishing/ and add a Pending Publisher with:
@@ -265,7 +266,7 @@ The `publish.yml` workflow is wired for Trusted Publishing via OIDC. PyPI reject
    - Environment: `publish`
 3. Re-dispatch the workflow:
    ```
-   gh workflow run publish.yml --ref v0.2.2 \
+   gh workflow run publish.yml --ref v0.2.3 \
      --field confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE \
      -R rafaelscosta/claude-i
    ```
