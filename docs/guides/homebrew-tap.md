@@ -1,6 +1,6 @@
 # Homebrew Tap — `rafaelscosta/homebrew-claude-i`
 
-This guide documents the Homebrew tap, the dev-pass URL strategy used during the v0.2.0 epic, the epic-close finalization steps, and the curl-install security posture.
+This guide documents the Homebrew tap, the current GitHub Release source strategy, the optional future PyPI URL flip, and the curl-install security posture.
 
 ## Tap Repository
 
@@ -18,44 +18,39 @@ The tap name is **`homebrew-claude-i`** by Homebrew convention. The `homebrew-` 
 
 The formula installs `claude-i` into a Homebrew-managed virtualenv at `libexec`, symlinks the entry-point into `bin/claude-i`, and declares `tmux` as a runtime dependency so a fresh `brew install` produces a working `claude-i` in one shot.
 
-Source URL strategy varies by phase:
+Current source URL strategy:
 
-| Phase                       | Source URL                                                                                                              | `sha256`                              |
-|-----------------------------|-------------------------------------------------------------------------------------------------------------------------|---------------------------------------|
-| **v0.2.0 dev pass** (current) | `https://github.com/rafaelscosta/claude-i/releases/download/v0.2.0-pre/claude_i-0.2.0.tar.gz` (pre-release sdist asset) | `28738be41964796c031f4b2927839e3282a890f906866385ead2279879ec4353` |
-| **v0.2.0 final** (epic close) | `https://files.pythonhosted.org/packages/.../claude_i-0.2.0.tar.gz` (canonical PyPI URL after `publish.yml`)             | regenerated via `shasum -a 256`       |
+| Phase | Source URL | `sha256` |
+|---|---|---|
+| **Current public formula** | `https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3.tar.gz` | `ba7d4f6fcf7608c8681c0bfa2f14fd47c992f705d1211350988ebc967838513c` |
+| **Optional future PyPI flip** | `https://files.pythonhosted.org/packages/.../claude_i-<version>.tar.gz` after `publish.yml` succeeds | regenerated from the downloaded PyPI sdist |
 
-The dev-pass URL points at a GitHub pre-release tagged `v0.2.0-pre`. This is deliberate:
+The current formula points at the public GitHub Release sdist because PyPI publication is still pending Trusted Publisher setup. This is deliberate:
 
-- The pre-release URL is **portable and public** (no `file://` paths in the committed formula — see `.claude/rules/portable-paths.md`).
-- The pre-release does **not** burn the canonical `v0.2.0` git tag, which is reserved for the final epic-close release (see `NOTES.md` § "v0.2.0 Release Tag — Deferred to Epic Close").
-- The pre-release sdist is byte-identical to the artifact that will be uploaded to PyPI by `publish.yml` at epic close. The SHA256 above is the source of truth.
+- The GitHub Release URL is portable and public; no local `file://` paths are committed.
+- Homebrew verifies the declared `sha256` before installation.
+- The formula can be flipped to a canonical PyPI `files.pythonhosted.org` URL after the first successful PyPI publish, but that is no longer a blocker for public Homebrew installs.
 
-## Epic-Close Finalization (STORY-001.4 Task 5.9)
+## Optional PyPI URL Flip
 
-When the epic-close subtask runs:
+After `claude-i` is published to PyPI, the tap can optionally switch from the GitHub Release sdist to the PyPI-hosted sdist:
 
-1. Tag and push `v0.2.0`:
+1. Trigger the publish workflow for the current release:
    ```bash
    cd /Users/rafaelcosta/Projects/AIOX/claude-i
-   git tag v0.2.0
-   git push origin v0.2.0
+   gh workflow run publish.yml --ref v0.2.3 \
+     --field confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE
    ```
-2. Trigger the publish workflow:
+2. Once the package is on PyPI, capture the canonical sdist URL and SHA:
    ```bash
-   gh workflow run publish.yml
+   pip download --no-deps --no-binary :all: claude-i==0.2.3 -d /tmp/claude-i-pypi/
+   shasum -a 256 /tmp/claude-i-pypi/claude_i-0.2.3.tar.gz
+   # The URL prints during pip download, usually https://files.pythonhosted.org/packages/<hash>/claude_i-0.2.3.tar.gz
    ```
-   Approve the `publish` environment gate when prompted.
-3. Once `claude-i==0.2.0` is on PyPI, capture the canonical sdist URL and SHA:
-   ```bash
-   pip download --no-deps --no-binary :all: claude-i==0.2.0 -d /tmp/claude-i-pypi/
-   shasum -a 256 /tmp/claude-i-pypi/claude_i-0.2.0.tar.gz
-   # The URL prints during pip download — typically https://files.pythonhosted.org/packages/<hash>/claude_i-0.2.0.tar.gz
-   ```
-4. In `rafaelscosta/homebrew-claude-i`, edit `Formula/claude-i.rb`:
+3. In `rafaelscosta/homebrew-claude-i`, edit `Formula/claude-i.rb`:
    - Set `url` to the canonical `files.pythonhosted.org` URL.
    - Set `sha256` to the freshly captured value.
-5. Verify locally on a clean macOS:
+4. Verify locally on a clean macOS:
    ```bash
    brew untap rafaelscosta/claude-i || true
    brew tap rafaelscosta/claude-i
@@ -63,35 +58,29 @@ When the epic-close subtask runs:
    brew test rafaelscosta/claude-i/claude-i
    claude-i --version
    ```
-6. Commit + push the tap:
+5. Commit + push the tap:
    ```bash
    cd /Users/rafaelcosta/Projects/AIOX/homebrew-claude-i
    git add Formula/claude-i.rb
-   git commit -m "release: finalize v0.2.0 url to canonical PyPI [EPIC-001 close]"
+   git commit -m "release: switch claude-i formula to PyPI sdist"
    git push origin main
    ```
-7. Delete the `v0.2.0-pre` pre-release once the canonical formula is live:
-   ```bash
-   cd /Users/rafaelcosta/Projects/AIOX/claude-i
-   gh release delete v0.2.0-pre --yes --cleanup-tag
-   ```
-   This is optional — leaving the pre-release in place is harmless but tidier to remove once it has no consumers.
 
 ## Multi-OS Smoke (`smoke.yml`)
 
 The 3-OS install smoke matrix lives in `.github/workflows/smoke.yml` and runs on:
 
-- `macos-latest` — builds sdist, invokes `bash install.sh --local dist/claude_i-0.2.0.tar.gz`, asserts `claude-i --version` exits 0 with the expected version string.
+- `macos-latest` — builds sdist, invokes `bash install.sh --local dist/claude_i-<version>.tar.gz`, asserts `claude-i --version` exits 0 with the expected version string.
 - `ubuntu-latest` — same flow.
 - `fedora:latest` container (running on `ubuntu-latest`) — same flow.
 
-Windows is **out of scope** for v0.2.0 per the Epic *Out of Scope* clause and AC-10. A future story may add a `windows-latest` job that asserts `claude-i` exits 3 (`PLATFORM_ERROR`) on `sys.platform == "win32"`.
+Windows native remains out of scope. A future story may add a `windows-latest` job that asserts `claude-i` exits 3 (`PLATFORM_ERROR`) on `sys.platform == "win32"`.
 
 The smoke matrix asserts **install + version**, not end-to-end prompt execution. A live `claude` binary and Anthropic credentials are not required and not available in public CI.
 
 ## Security
 
-### `curl ... | bash` checksum risk — accepted for v0.2.0
+### `curl ... | bash` checksum risk
 
 The bootstrap one-liner is:
 
@@ -104,10 +93,10 @@ This trusts:
 1. TLS to `raw.githubusercontent.com` (HTTPS validates GitHub's certificate).
 2. The integrity of GitHub's content addressing — the URL serves whatever is committed to `main`.
 
-It does **not** verify a checksum of the script bytes. An attacker who compromises the `main` branch can change `install.sh` and any download performed between the compromise and detection will execute the tampered code. This risk is **accepted by the operator for v0.2.0**:
+It does **not** verify a checksum of the script bytes. An attacker who compromises the `main` branch can change `install.sh` and any download performed between the compromise and detection will execute the tampered code. This risk is accepted for the current bootstrap path:
 
 - The script is small (~10 KB) and human-auditable.
-- A future story may add a separate hash-verified install path (`install.sh.sha256` published alongside the script, with a wrapper that downloads, verifies, then executes), but that is not a v0.2.0 blocker.
+- A future story may add a separate hash-verified install path (`install.sh.sha256` published alongside the script, with a wrapper that downloads, verifies, then executes).
 - Users who want stronger guarantees can `git clone` the repo and run `bash install.sh` from a known SHA.
 
 ### Wheel/sdist hash verification
@@ -139,6 +128,6 @@ If `install.sh` runs inside a fresh `fedora:latest` container (as in `smoke.yml`
 
 - `install.sh` — bootstrap script.
 - `.github/workflows/smoke.yml` — 3-OS install smoke matrix.
-- `NOTES.md` § "v0.2.0 Release Tag — Deferred to Epic Close" — rationale for deferring the canonical tag.
+- `NOTES.md` § "IP Status — Public Release" — current public release and PyPI status.
 - `docs/stories/STORY-001.4-multi-target-install.md` — acceptance criteria for this story.
 - `docs/guides/pypi-trusted-publishing.md` — OIDC trusted publishing setup (STORY-001.3).

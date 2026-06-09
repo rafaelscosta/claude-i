@@ -6,7 +6,7 @@ The interactive `claude` CLI loads everything (hooks, MCPs, skills, plugins); `c
 
 ## Status
 
-**v0.2.2** — production-ready for both interactive use and non-interactive automation. See `docs/epics/EPIC-001-packaging-and-hardening.md` for full scope and `docs/stories/STORY-001.7-*.md` for the most recent changes.
+**v0.2.3** — production-ready for both interactive use and non-interactive automation. This release fixes long-prompt submission, `@agent`/slash-skill prompts, and chat-title/SKIP misattribution. See `docs/stories/STORY-001.8-tmux-paste-race.md` for the latest reliability work.
 
 ## Install
 
@@ -22,37 +22,37 @@ brew install claude-i
 ### Option 2 — pipx + GitHub Release
 
 ```bash
-pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2-py3-none-any.whl
+pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3-py3-none-any.whl
 ```
 
 ### Option 3 — pipx + git tag
 
 ```bash
-pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.2
+pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.3
 ```
 
 ### Option 4 — sdist (uv-compatible)
 
 ```bash
-pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2.tar.gz
-# or: uv tool install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.2/claude_i-0.2.2.tar.gz
+pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3.tar.gz
+# or: uv tool install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3.tar.gz
 ```
 
 ### PyPI (pending Trusted Publisher setup)
 
-The `publish.yml` workflow is wired for PyPI Trusted Publishing via OIDC. Once a Pending Publisher is registered at https://pypi.org/manage/account/publishing/, the next dispatch lands `claude-i` on PyPI and enables `pipx install claude-i` / `uv tool install claude-i` directly. See `NOTES.md` § "IP Status — Public Release" for the operator setup steps.
+The `publish.yml` workflow is wired for PyPI Trusted Publishing via OIDC. Once a Pending Publisher is registered at https://pypi.org/manage/account/publishing/, the next dispatch can land `claude-i` on PyPI and enable `pipx install claude-i` / `uv tool install claude-i` directly. See `NOTES.md` § "IP Status — Public Release" for the operator setup steps.
 
 ### Verify
 
 ```bash
-claude-i --version    # → claude-i 0.2.2
+claude-i --version    # → claude-i 0.2.3
 claude-i doctor       # self-diagnostic — should report 5/5 PASS
 ```
 
-### Artifact checksums (v0.2.2)
+### Artifact checksums (v0.2.3)
 
-- `claude_i-0.2.2-py3-none-any.whl` — SHA256 `97992abe632c2ae759378642f8353a861be7d3f84d932c6e0ba85234ed36933d`
-- `claude_i-0.2.2.tar.gz` — SHA256 `f25d84f24916de2a8f6dc017169de71baea030b2b7e56a06e5e5a08e44719084`
+- `claude_i-0.2.3-py3-none-any.whl` — SHA256 `05779011d0869373422019d4595d1bb25d218cfa008117fe0aab1fe8929dbc69`
+- `claude_i-0.2.3.tar.gz` — SHA256 `ba7d4f6fcf7608c8681c0bfa2f14fd47c992f705d1211350988ebc967838513c`
 
 ## Usage
 
@@ -114,7 +114,7 @@ claude-i reap                    # kill orphaned claude-i-* tmux sessions
 
 ## Distribution Status
 
-v0.2.2 (2026-05-19) is the first public release after the IP-lock reversal documented in `NOTES.md` § "IP Status — Public Release".
+v0.2.3 (2026-05-20) is the current public release. v0.2.2 was the first public release after the IP-lock reversal documented in `NOTES.md` § "IP Status — Public Release".
 
 | Path | Status |
 |---|---|
@@ -122,7 +122,7 @@ v0.2.2 (2026-05-19) is the first public release after the IP-lock reversal docum
 | GitHub Release (wheel + sdist) | ✓ active |
 | Homebrew tap (`rafaelscosta/claude-i`) | ✓ active |
 | PyPI (`pip install claude-i`) | pending Trusted Publisher setup |
-| `install.sh` bootstrap (`curl | sh`) | available for local testing; canonical one-liner pending |
+| `install.sh` bootstrap (`curl | sh`) | macOS uses Homebrew; Linux direct PyPI path pending first PyPI publish; `--local` supported |
 
 The `install.sh` script lives at the repo root and supports `--local <path>` mode using artifacts downloaded from a GitHub Release. See [`docs/guides/homebrew-tap.md`](docs/guides/homebrew-tap.md) for detailed bootstrap docs.
 

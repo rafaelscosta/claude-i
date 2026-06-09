@@ -1,8 +1,8 @@
 # PyPI Publish Workflow — Trusted Publishing (OIDC)
 #
-# ⚠️ IP-PROTECTION STATUS (2026-05-18): The claude-i repository is PERMANENTLY
-# PRIVATE and PyPI publication is PERMANENTLY FORBIDDEN. See NOTES.md
-# § IP Status — Private Forever for the canonical decision and unlock procedure.
+# Public-release status (2026-05-19+): the claude-i repository is PUBLIC and
+# PyPI publication is AUTHORIZED but still gated on the operator configuring
+# the PyPI Trusted Publisher. See NOTES.md § IP Status — Public Release.
 #
 # This workflow remains in the repo as future-proof infrastructure but is
 # guarded by a required confirmation string input that makes accidental
@@ -13,11 +13,11 @@
 # Tag-triggered auto-publish (`on: push: tags: [v*.*.*]`) is deliberately
 # OMITTED — re-enabling it would bypass the confirm_release input guard.
 # DO NOT add a push:tags trigger without first updating NOTES.md
-# § IP Status — Private Forever.
+# § IP Status — Public Release and the PyPI trusted-publishing guide.
 #
 # Trigger: workflow_dispatch only, with mandatory confirm_release string.
 #
-# Requirements (one-time, operator — only relevant if IP status is reversed):
+# Requirements (one-time, operator):
 #   1. PyPI Pending Publisher configured for repository=rafaelscosta/claude-i,
 #      workflow=publish.yml, environment=publish (see
 #      docs/guides/pypi-trusted-publishing.md).
@@ -40,9 +40,9 @@ on:
           ⚠️ Publishing makes the wheel + sdist available on pypi.org WORLDWIDE.
           The sdist contains src/. PyPI versions are PERMANENT.
 
-          Repo is currently IP-protected (private). Publishing CONTRADICTS that status.
-          DO NOT run this workflow unless the IP status has formally changed
-          (see NOTES.md § IP Status — Private Forever).
+          Publishing is authorized by NOTES.md § IP Status — Public Release,
+          but should run only after the PyPI Trusted Publisher is configured
+          and the current release version is intended for public PyPI.
         required: true
         type: string
 
@@ -65,11 +65,12 @@ jobs:
             echo "Required: 'I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE'"
             echo ""
             echo "This workflow PERMANENTLY publishes claude-i to public PyPI."
-            echo "Repo is currently IP-protected (private). Publishing breaks that."
+            echo "Run only after PyPI Trusted Publisher setup is complete."
             echo ""
-            echo "If IP status has formally changed and you intend to publish:"
-            echo "  1. Update NOTES.md § IP Status — Private Forever"
-            echo "  2. Re-run with confirm_release set EXACTLY as documented"
+            echo "If you intend to publish the current release:"
+            echo "  1. Confirm NOTES.md § IP Status — Public Release is current"
+            echo "  2. Confirm PyPI Trusted Publisher points at workflow=publish.yml and environment=publish"
+            echo "  3. Re-run with confirm_release set EXACTLY as documented"
             exit 1
           fi
           echo "✓ Confirmation string verified. Proceeding with PyPI publish."
