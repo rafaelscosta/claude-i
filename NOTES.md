@@ -377,3 +377,31 @@ time out across all `--retries`. This is environmental, not a claude-i
 regression. The `/idea` integration test skips (not fails) under this
 condition. Re-run on an idle host to see the green path. Production
 mitigation remains `--retries 3`.
+
+## STORY-001.12 / GitHub Actions Node 24 hardening
+
+**Date:** 2026-06-10
+**Author:** @devops (Gage) closing STORY-001.12
+
+### Node.js 20 action runtime deprecation (FIXED)
+
+Post-merge CI for STORY-001.10 and STORY-001.11 passed, but GitHub Actions
+annotated every job that used `actions/checkout@v4` and
+`actions/setup-python@v5` with the Node.js 20 runtime deprecation warning.
+This was environmental/release-infrastructure drift, not an application
+failure.
+
+Resolution:
+- `actions/checkout@v4` -> `actions/checkout@v5`
+- `actions/setup-python@v5` -> `actions/setup-python@v6`
+- Fedora smoke container `fedora:latest` -> `registry.fedoraproject.org/fedora:latest`
+  after repeated Docker Hub pull timeouts during PR validation.
+
+Scope:
+- `.github/workflows/ci.yml`
+- `.github/workflows/smoke.yml`
+- `.github/workflows/publish.yml`
+
+The publish workflow remains `workflow_dispatch`-only and guarded by the
+existing confirmation string plus `environment: publish`. PyPI publication is
+still pending the operator's PyPI Trusted Publisher setup.
