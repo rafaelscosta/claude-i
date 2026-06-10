@@ -4,8 +4,8 @@
 |---|---|
 | Story | STORY-001.13 - PyPI 0.2.4 Release Prep |
 | Epic | EPIC-001 maintenance |
-| Gate | **READY FOR RELEASE CEREMONY** |
-| Quality Score | **95 / 100 pre-release** |
+| Gate | **PASS** |
+| Quality Score | **100 / 100** |
 | Reviewer | Self-validated |
 | Review Date | 2026-06-10 |
 | Risk Profile | medium - release metadata and irreversible PyPI publication path |
@@ -13,11 +13,10 @@
 
 ## Verdict
 
-**READY FOR RELEASE CEREMONY - 95/100 pre-release.** The first PyPI publish
-should use `0.2.4`, not stale `v0.2.3`, because current `main` contains
-additional validated fixes after the `v0.2.3` tag. Local validation and PR
-GitHub Actions checks passed. Final PASS requires merge, post-merge checks,
-`v0.2.4` tag/release, and successful PyPI publish verification.
+**PASS - 100/100.** The first PyPI publish used `0.2.4`, not stale `v0.2.3`,
+because current `main` contained additional validated fixes after the `v0.2.3`
+tag. Local validation, PR checks, post-merge checks, tag/release creation,
+Trusted Publishing, and public PyPI install verification all passed.
 
 ## Verification Matrix
 
@@ -38,17 +37,21 @@ GitHub Actions checks passed. Final PASS requires merge, post-merge checks,
 | `claude-i doctor --json` | PASS | `overall=pass` |
 | `git diff --check` | PASS | No whitespace errors |
 | PR checks | PASS | PR #5 `ci` and `smoke` passed; CodeRabbit remained pending and is not branch-protection required |
-| Post-merge checks | PENDING | Run before tag |
-| PyPI publish verification | PENDING | Run after Trusted Publisher setup and workflow dispatch |
+| Post-merge checks | PASS | `ci` and `smoke` passed on `main` before tag |
+| GitHub Release | PASS | `v0.2.4` release created from `b8bd885` |
+| PyPI Trusted Publisher | PASS | Pending Publisher configured for `rafaelscosta/claude-i`, `publish.yml`, environment `publish` |
+| PyPI publish workflow | PASS | Run `27287413340` completed successfully |
+| Public PyPI JSON | PASS | `claude-i 0.2.4` exposes wheel + sdist with expected SHA256 |
+| Public install smoke | PASS | `pip`, `pipx run`, and `uvx` installed/executed `claude-i 0.2.4` |
 
 ## Top Issues
 
 | ID | Severity | Description | Path forward |
 |---|---|---|---|
-| Q-1 | MEDIUM | README becomes PyPI-first before the publish workflow succeeds. | Only merge/tag/publish as a single release ceremony; if publish fails, fix before announcing release. |
-| Q-2 | LOW | Homebrew tap remains v0.2.3 after PyPI v0.2.4. | Follow up with formula sync once PyPI sdist URL/SHA are available. |
+| Q-1 | RESOLVED | README became PyPI-first before publish success. | Release ceremony completed; PyPI is live and verified. |
+| Q-2 | RESOLVED | Homebrew tap remained v0.2.3 immediately after PyPI v0.2.4. | Tap PR #1 switched the formula to the PyPI v0.2.4 sdist and passed Homebrew validation. |
 
 ## Handoff
 
-Ready for local validation, PR, tag, GitHub Release, and PyPI Trusted Publisher
-publish sequence.
+Release ceremony completed. Remaining work is ordinary future release
+maintenance, not a blocker for STORY-001.13.

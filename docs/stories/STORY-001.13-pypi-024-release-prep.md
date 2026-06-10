@@ -76,8 +76,8 @@ release to `0.2.4` before the first Trusted Publisher dispatch.
 - This story intentionally does not mutate the existing `v0.2.3` tag.
 - This story does not publish to PyPI by itself; publish happens only after PR,
   tag, GitHub Release, and Trusted Publisher setup are complete.
-- The Homebrew tap remains a separate repository and stays on v0.2.3 until the
-  post-PyPI formula sync.
+- The Homebrew tap remains a separate repository. Its post-PyPI formula sync
+  was completed in `rafaelscosta/homebrew-claude-i#1`.
 
 ## Dev Agent Record
 
@@ -88,8 +88,8 @@ release to `0.2.4` before the first Trusted Publisher dispatch.
   publish.
 - Updated release guides to use `v0.2.4` for the first Trusted Publisher
   dispatch.
-- Preserved the factual Homebrew tap state as v0.2.3 until follow-up formula
-  sync.
+- Preserved the factual Homebrew tap state during release prep, then synced the
+  tap to the PyPI v0.2.4 sdist after publish verification.
 
 ### Validation
 

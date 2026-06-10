@@ -7,8 +7,8 @@ API token-based workflows are deliberately avoided.
 **Audience:** repository operator (rafaelscosta) — these steps require
 PyPI account credentials and GitHub repository admin access.
 
-**When to execute:** before the first `claude-i` PyPI release. After completion,
-the `publish.yml` workflow can be triggered manually via
+**Current state:** completed for `v0.2.4` on 2026-06-10. The `publish.yml`
+workflow can be triggered manually for future releases via
 `gh workflow run publish.yml` (or, if tag-trigger is later enabled, by pushing
 `git tag v*.*.*`).
 
@@ -19,15 +19,14 @@ the `publish.yml` workflow can be triggered manually via
 1. PyPI account at https://pypi.org (must be the same account that will own
    the `claude-i` project on PyPI).
 2. GitHub repository admin on `rafaelscosta/claude-i`.
-3. `claude-i` package name available on PyPI. The project endpoint still
-   returned 404 during the v0.2.4 release prep, so the first PyPI
-   publish should register the project.
+3. `claude-i` package ownership on PyPI. The first publish registered the
+   project at https://pypi.org/project/claude-i/.
 
 ---
 
 ## Step 1 — Configure PyPI Pending Publisher
 
-This step creates a Trusted Publisher record on pypi.org pointing to this
+This one-time step creates a Trusted Publisher record on pypi.org pointing to this
 repository BEFORE the first release. Once a Pending Publisher is configured
 and a successful publish occurs, the project is registered and the Pending
 Publisher becomes a regular Trusted Publisher.
@@ -68,9 +67,9 @@ access to `main` could trigger a publish.
 
 ---
 
-## Step 3 — Trigger the First Publish
+## Step 3 — Trigger a Publish
 
-After Steps 1 and 2 are complete:
+After the Trusted Publisher and GitHub environment are configured:
 
 1. Ensure `main` is up to date with the intended release version
    (`version = "0.2.4"` in `pyproject.toml` for the current public release).
