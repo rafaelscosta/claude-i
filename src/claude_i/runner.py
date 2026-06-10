@@ -35,6 +35,7 @@ STORY-001.2 hardens this module further:
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
@@ -189,6 +190,44 @@ def _cleanup_stale_sentinels() -> None:
             continue
 
 
+def _cleanup_run_artifacts(
+    sentinel: Path,
+    payload: Path,
+    wait_seconds: float = 0.0,
+    interval: float | None = None,
+) -> None:
+    """Best-effort cleanup for one ``runner.run`` sentinel family.
+
+    Timeout/retry paths and title-filtered Stop events can race the hook
+    command: the hook may have written ``.json`` before ``run()`` times out,
+    then touch ``.done`` just after the first cleanup. When ``wait_seconds`` is
+    positive, keep sweeping briefly after ``kill-session`` so late artifacts do
+    not accumulate.
+    """
+    poll_interval = _POST_STOP_CLEANUP_INTERVAL if interval is None else interval
+    payload_tmp = Path(str(payload) + ".tmp")
+    paths = (sentinel, payload, payload_tmp)
+
+    def sweep() -> None:
+        for path in paths:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                # Cleanup must never mask the real run outcome.
+                pass
+
+    sweep()
+    if wait_seconds <= 0:
+        return
+
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        time.sleep(poll_interval)
+        sweep()
+
+
 #: STORY-001.5 / Task 6.5 / Gap G17 — readiness poller default poll interval.
 #: 250ms balances "responsive" (poller returns shortly after the TUI is ready)
 #: against "noisy" (every poll fires a ``tmux capture-pane`` subprocess).
@@ -202,6 +241,13 @@ _READY_POLL_INTERVAL: float = 0.25
 #: lags. 2s is generous; production observations show <100ms.
 _PAYLOAD_GRACE_SECONDS: float = 2.0
 _PAYLOAD_POLL_INTERVAL: float = 0.05
+
+# STORY-001.10 / late Stop-hook cleanup — after timeout or title-filtered
+# Stop events, the hook can be between ``mv payload`` and ``touch sentinel``
+# while ``run()`` is already unwinding. A short post-kill sweep catches that
+# late touch without adding latency to ordinary no-title success.
+_POST_STOP_CLEANUP_SECONDS: float = 8.0
+_POST_STOP_CLEANUP_INTERVAL: float = 0.05
 
 #: STORY-001.6 / Bug 4 — Claude Code 2.1.143 sometimes fires the Stop hook
 #: BEFORE the final assistant turn is flushed to the transcript JSONL file.
@@ -618,6 +664,12 @@ def run(
     sentinel = Path(sentinel_str)
     payload = Path(str(sentinel) + ".json")
     session = f"claude-i-{os.getpid()}"
+    atexit.register(
+        _cleanup_run_artifacts,
+        sentinel,
+        payload,
+        _POST_STOP_CLEANUP_SECONDS,
+    )
 
     # STORY-001.6 / Bug 1 — REAL ROOT CAUSE: the v0.2.0 code waited for
     # ``sentinel.exists()`` to become True, BUT ``mkstemp`` already created
@@ -679,6 +731,7 @@ def run(
         )
         tail_thread.start()
 
+    post_cleanup_wait = 0.0
     try:
         # STORY-001.5 / Task 6.5 / Gap G17 — readiness poll replaces the
         # seed's fixed ``time.sleep(ready_wait)``. ``ready_wait`` is now the
@@ -762,13 +815,12 @@ def run(
                 # remaining ``timeout`` budget covers both the current and
                 # the upcoming real-response fire.
                 title_fires_observed += 1
+                post_cleanup_wait = max(
+                    post_cleanup_wait, _POST_STOP_CLEANUP_SECONDS
+                )
                 # Reset sentinel + payload so the inner while-loop blocks
                 # again until claude-code re-touches them.
-                for p in (sentinel, payload):
-                    try:
-                        p.unlink()
-                    except FileNotFoundError:
-                        pass
+                _cleanup_run_artifacts(sentinel, payload)
                 # Cap how long we tolerate consecutive title fires. After
                 # _CHAT_TITLE_RETRY_SECONDS without seeing a real response,
                 # fall through with what we have (the title) — better to
@@ -841,14 +893,17 @@ def run(
             if isinstance(b, dict) and b.get("type") == "text"
         )
         return text, metadata
+    except BaseException:
+        post_cleanup_wait = max(post_cleanup_wait, _POST_STOP_CLEANUP_SECONDS)
+        raise
     finally:
         tail_stop.set()
         if tail_thread:
             tail_thread.join(timeout=1)
         # The whole point: kill-session reaps the entire process tree.
         tmux("kill-session", "-t", session, check=False)
-        for p in (sentinel, payload):
-            try:
-                p.unlink()
-            except FileNotFoundError:
-                pass
+        _cleanup_run_artifacts(
+            sentinel,
+            payload,
+            wait_seconds=post_cleanup_wait,
+        )

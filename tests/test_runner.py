@@ -27,6 +27,31 @@ import pytest
 from claude_i import runner
 
 
+@pytest.fixture(autouse=True)
+def _isolate_runner_tempfiles(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep mocked ``runner.run`` tests from leaking real tempdir sentinels."""
+    original_mkstemp = runner.tempfile.mkstemp
+
+    def mkstemp_in_tmp_path(
+        suffix: str | None = None,
+        prefix: str | None = None,
+        dir: str | None = None,
+        text: bool = False,
+    ) -> tuple[int, str]:
+        target_dir = str(tmp_path) if dir is None else dir
+        return original_mkstemp(
+            suffix="" if suffix is None else suffix,
+            prefix="" if prefix is None else prefix,
+            dir=target_dir,
+            text=text,
+        )
+
+    monkeypatch.setattr(runner.tempfile, "mkstemp", mkstemp_in_tmp_path)
+    monkeypatch.setattr(runner, "_POST_STOP_CLEANUP_SECONDS", 0.0)
+
+
 def _make_subprocess_capture() -> tuple[MagicMock, dict[str, Any]]:
     """Return a ``subprocess.run`` mock that records the FIRST call's args.
 
@@ -835,6 +860,51 @@ def test_cleanup_stale_sentinels_uses_tempfile_gettempdir(
     assert not old.exists(), (
         "cleanup must read tempfile.gettempdir(), not hardcoded /tmp/"
     )
+
+
+def test_cleanup_run_artifacts_sweeps_late_stop_hook_touch(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """STORY-001.10 — cleanup catches Stop-hook artifacts that appear late.
+
+    Reproduces the observed timeout race: ``run()`` starts unwinding while the
+    hook command is between payload creation and sentinel touch. The first
+    sweep can miss the later files; the post-kill polling window must remove
+    them before they accumulate in the tempdir.
+    """
+    from pathlib import Path as _Path
+
+    sentinel = _Path(str(tmp_path)) / "claude-i-late.done"
+    payload = _Path(str(sentinel) + ".json")
+    payload_tmp = _Path(str(payload) + ".tmp")
+
+    clock = {"now": 0.0, "sleeps": 0}
+
+    def fake_monotonic() -> float:
+        return clock["now"]
+
+    def fake_sleep(seconds: float) -> None:
+        clock["sleeps"] += 1
+        if clock["sleeps"] == 1:
+            payload.write_text("{}")
+        elif clock["sleeps"] == 2:
+            sentinel.touch()
+            payload_tmp.write_text("partial")
+        clock["now"] += seconds
+
+    monkeypatch.setattr(runner.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(runner.time, "sleep", fake_sleep)
+
+    runner._cleanup_run_artifacts(
+        sentinel,
+        payload,
+        wait_seconds=0.11,
+        interval=0.05,
+    )
+
+    assert not sentinel.exists()
+    assert not payload.exists()
+    assert not payload_tmp.exists()
 
 
 # ---------------------------------------------------------------------------
