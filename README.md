@@ -133,7 +133,7 @@ v0.2.4 (2026-06-10) is the current public release. v0.2.3 fixed long prompts, ag
 | GitHub Release (wheel + sdist) | ✓ active |
 | Homebrew tap (`rafaelscosta/claude-i`) | ✓ active |
 | PyPI (`pipx install claude-i`) | ✓ active |
-| `install.sh` bootstrap (`curl | sh`) | macOS uses Homebrew; Linux direct PyPI path available after first PyPI publish; `--local` supported |
+| `install.sh` bootstrap (`curl | sh`) | macOS uses Homebrew; Linux uses the PyPI path; `--local` supported |
 
 The `install.sh` script lives at the repo root and supports `--local <path>` mode using artifacts downloaded from a GitHub Release. See [`docs/guides/homebrew-tap.md`](docs/guides/homebrew-tap.md) for detailed bootstrap docs.
 

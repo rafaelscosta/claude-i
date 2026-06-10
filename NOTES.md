@@ -98,28 +98,22 @@ ceremony.
 
 ## STORY-001.4 — Homebrew Formula URL Finalization Deferred
 
-**Status:** STORY-001.4 lands the formula `Formula/claude-i.rb` in
-`rafaelscosta/homebrew-claude-i` with a **dev-pass URL** pointing at a
-GitHub pre-release sdist (`v0.2.0-pre`). The canonical PyPI
-`files.pythonhosted.org` URL is **not yet wired** because:
-
-1. `v0.2.0` git tag is intentionally deferred (see section above).
-2. `publish.yml` has not run, so the package is not on PyPI.
+**Status:** completed by the public `v0.2.4` release. The formula
+`Formula/claude-i.rb` in `rafaelscosta/homebrew-claude-i` now points at the
+canonical PyPI sdist for `claude-i 0.2.4`.
 
 **Dev-pass artifact:**
 - URL: `https://github.com/rafaelscosta/claude-i/releases/download/v0.2.0-pre/claude_i-0.2.0.tar.gz`
 - SHA256: `28738be41964796c031f4b2927839e3282a890f906866385ead2279879ec4353`
 
-**Finalization checklist** (executed at epic close, per STORY-001.4 Task 5.9):
-1. Tag and push `v0.2.0`.
-2. Run `gh workflow run publish.yml` and approve the `publish` environment gate.
-3. Capture canonical PyPI URL + SHA256 via `pip download`.
-4. Update `Formula/claude-i.rb` `url` + `sha256`.
-5. `brew untap` / `brew tap` / `brew install` / `brew test` cycle on clean macOS.
-6. Commit + push the tap.
-7. Optionally `gh release delete v0.2.0-pre --cleanup-tag` to remove the pre-release.
+**Completion evidence:**
+- PyPI sdist URL: `https://files.pythonhosted.org/packages/eb/e1/77672eeb8eace8dfe7b272a1226c4ae1b558aed2bd6715c682fed0c69508/claude_i-0.2.4.tar.gz`
+- SHA256: `ca0a6575917f945fa6cb09c858130c0ae6094500500b70d7ffd9789219c3b9dc`
+- Homebrew tap PR: `rafaelscosta/homebrew-claude-i#1`
+- Validation: `brew audit`, `brew reinstall --build-from-source`, `brew test`,
+  `claude-i --version`, and `claude-i doctor --json` all passed for `0.2.4`.
 
-Full procedure documented in `docs/guides/homebrew-tap.md` § Epic-Close Finalization.
+Full procedure documented in `docs/guides/homebrew-tap.md` § Release Update Procedure.
 
 
 ## STORY-001.5 — G14 SubagentStop Deferred
@@ -171,58 +165,38 @@ https://github.com/rafaelscosta/claude-i/releases/tag/v0.2.0
 2. `gh release download v0.2.0 --pattern '*.whl' -R rafaelscosta/claude-i && pipx install ./claude_i-0.2.0-py3-none-any.whl`
 3. `gh release download v0.2.0 --pattern '*.tar.gz' -R rafaelscosta/claude-i && uv tool install ./claude_i-0.2.0.tar.gz`
 
-### Deferred (public-release paths)
+### Completed public-release paths
 
-The following install surfaces are wired in code but inert until the repo
-flips public:
+The public distribution surfaces are active as of `v0.2.4`:
 
-- **PyPI** — `pipx install claude-i` / `uv tool install claude-i`. Blocked
-  on running `gh workflow run publish.yml --ref v0.2.0` against a public
-  repo with the `publish` GitHub Environment + PyPI Trusted Publisher
-  (`pending_publisher`) configured.
-- **Homebrew tap** — `brew install rafaelscosta/claude-i/claude-i`. Blocked
-  on STORY-001.4 Task 5.9 (canonical PyPI URL + SHA256 in
-  `Formula/claude-i.rb`). The current formula at
-  `rafaelscosta/homebrew-claude-i@main` points at a dev-pass URL
-  (`v0.2.0-pre` GitHub release) — works locally, NOT for strangers.
-- **One-line bootstrap** — `curl -fsSL .../install.sh | bash`. The
-  `raw.githubusercontent.com/rafaelscosta/claude-i/main/install.sh` URL
-  returns 404 to anonymous fetches while the repo is private.
+- **PyPI** — `pipx install claude-i` / `uv tool install claude-i`.
+- **Homebrew tap** — `brew install rafaelscosta/claude-i/claude-i`.
+- **One-line bootstrap** — `curl -fsSL .../install.sh | bash`.
 
-### Operator checklist — enable public release
+### Completed operator checklist — public release
 
-When the decision is made to go public, run these steps in order:
+The public-release checklist was completed across the v0.2.3 and v0.2.4
+release work:
 
 1. **Flip repo visibility:** `gh repo edit rafaelscosta/claude-i --visibility public --accept-visibility-change-consequences`.
    - Verify: `gh repo view rafaelscosta/claude-i --json visibility` → `"public"`.
    - Once flipped, `raw.githubusercontent.com/.../install.sh` returns 200 to anonymous.
-2. **Configure PyPI Trusted Publisher (pending):**
-   - PyPI account → Account → Publishing → Add a pending publisher
-   - Project name: `claude-i`, Owner: `rafaelscosta`, Repo: `claude-i`,
-     Workflow: `publish.yml`, Environment: `publish`
+2. **Configure PyPI Trusted Publisher:** completed for Project `claude-i`,
+   Owner `rafaelscosta`, Repo `claude-i`, Workflow `publish.yml`,
+   Environment `publish`.
 3. **Create GitHub Environment `publish`:**
    - `gh api repos/rafaelscosta/claude-i/environments/publish --method PUT`
    - Add required reviewer (yourself) for a manual approval gate.
-4. **Trigger PyPI publish:**
-   - `gh workflow run publish.yml --ref v0.2.0 -R rafaelscosta/claude-i`
-   - Approve the `publish` environment gate when prompted.
-   - Verify: `pip download claude-i==0.2.0 -d /tmp/pypi-verify --no-deps`
-5. **Capture canonical PyPI URL + SHA256:**
-   - `shasum -a 256 /tmp/pypi-verify/claude_i-0.2.0.tar.gz`
-   - Note `files.pythonhosted.org` URL from `pip download -v` output.
-6. **Update Homebrew formula** (STORY-001.4 Task 5.9):
-   - Edit `rafaelscosta/homebrew-claude-i:Formula/claude-i.rb` →
-     replace `url` + `sha256` with PyPI canonical values.
-   - `brew untap rafaelscosta/claude-i && brew tap rafaelscosta/claude-i`
-   - `brew install --force claude-i && brew test claude-i` on clean macOS.
-   - Commit + push tap.
+4. **Trigger PyPI publish:** completed for `v0.2.4`; workflow run
+   `27287413340` succeeded after the `publish` environment approval.
+5. **Capture canonical PyPI URL + SHA256:** completed from the public PyPI JSON.
+6. **Update Homebrew formula:** completed in `rafaelscosta/homebrew-claude-i#1`;
+   local Homebrew install/test passed for `0.2.4`.
 7. **Cleanup pre-release:**
    - `gh release delete v0.2.0-pre --cleanup-tag -R rafaelscosta/claude-i`
    - This removes the dev-pass artifact once the canonical PyPI URL is live.
-8. **Update homebrew-claude-i README** — remove "PENDING UPSTREAM PUBLICATION"
-   section, re-enable the simple `brew tap / brew install` matrix.
-9. **Update claude-i README** — collapse the "Private Repo" section back
-   into the public install matrix (Homebrew + pipx + uv + curl bootstrap).
+8. **Update homebrew-claude-i README:** completed in tap PR #1.
+9. **Update claude-i README:** completed; public install matrix is active.
 
 ### v0.2.0 Release artifact checksums (canonical for this distribution phase)
 
@@ -241,41 +215,33 @@ same tarball content).
 
 **Decision (operator, 2026-05-19):** IP-lock REVERSED. claude-i is published publicly.
 - Repository: PUBLIC (flipped 2026-05-19)
-- PyPI publication: AUTHORIZED — first Trusted Publisher release prepared as v0.2.4
+- PyPI publication: LIVE — first Trusted Publisher release published as v0.2.4
 - Current public release: v0.2.4 (2026-06-10)
-- Public Homebrew formula: AUTHORIZED — `rafaelscosta/homebrew-claude-i` formula remains on the canonical v0.2.3 GitHub Release artifact until the post-PyPI formula sync
+- Public Homebrew formula: LIVE — `rafaelscosta/homebrew-claude-i` formula points at the canonical PyPI v0.2.4 sdist
 
 **Rationale for reversal:** v0.2.2 reached production-ready automation reliability (STORY-001.7 closed; 10/10 reliability test with `--retries 3`). v0.2.3 then fixed the long-prompt paste/Enter race and chat-title/SKIP misattribution discovered in real AIOX prompt use (STORY-001.8). The IP-protection rationale from 2026-05-18 (preserving leverage during development) no longer applies once the product is stable and useful.
 
 **Public distribution paths now active:**
 - `pipx install claude-i` (PyPI)
 - `uv tool install claude-i` (PyPI)
-- `brew install rafaelscosta/claude-i/claude-i` (Homebrew tap — v0.2.3 until formula sync)
+- `brew install rafaelscosta/claude-i/claude-i` (Homebrew tap — v0.2.4 PyPI sdist)
 - `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.4/claude_i-0.2.4-py3-none-any.whl` (GitHub Release)
 - `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.4/claude_i-0.2.4.tar.gz` (GitHub Release sdist)
 - `pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.4` (git tag)
 
 **PyPI publication — release path:**
 
-The `publish.yml` workflow is wired for Trusted Publishing via OIDC. PyPI rejected the prior v0.2.2 dispatch with `invalid-publisher` because no Trusted Publisher was registered for the project. As of 2026-06-10, PyPI still returns 404 for `claude-i`; the first PyPI release should publish v0.2.4, not the older v0.2.3 tag, so PyPI matches the current `main` fixes. Operator setup steps:
+The `publish.yml` workflow is wired for Trusted Publishing via OIDC. PyPI
+rejected a prior v0.2.2 dispatch with `invalid-publisher` because no Trusted
+Publisher was registered. On 2026-06-10 the Pending Publisher was configured,
+`v0.2.4` was dispatched, environment `publish` was approved, and run
+`27287413340` completed successfully. Public PyPI JSON now reports
+`claude-i 0.2.4` with:
 
-1. Create / log into PyPI account.
-2. Visit https://pypi.org/manage/account/publishing/ and add a Pending Publisher with:
-   - PyPI Project Name: `claude-i`
-   - Owner: `rafaelscosta`
-   - Repository: `claude-i`
-   - Workflow filename: `publish.yml`
-   - Environment: `publish`
-3. Re-dispatch the workflow:
-   ```
-   gh workflow run publish.yml --ref v0.2.4 \
-     --field confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE \
-     -R rafaelscosta/claude-i
-   ```
-4. After success, verify `https://pypi.org/project/claude-i/` and smoke-test
-   `pipx install claude-i==0.2.4`.
+- Wheel SHA256: `6f945ae1be8c77fed6db259e7fec3cef749a3aea77164c3ec1d51cf39274c8cb`
+- Sdist SHA256: `ca0a6575917f945fa6cb09c858130c0ae6094500500b70d7ffd9789219c3b9dc`
 
-Until the workflow succeeds: Homebrew + GitHub Release paths are the canonical install routes.
+Smoke tests passed with `pip`, `pipx run`, and `uvx`.
 
 **Guard preserved (defense-in-depth):** The `publish.yml` workflow still requires the `confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE` string for any future dispatch. This prevents accidental re-publish of stale/wrong artifacts. The guard is procedural, not policy — it gates dispatch, not the decision.
 
@@ -407,4 +373,5 @@ Scope:
 
 The publish workflow remains `workflow_dispatch`-only and guarded by the
 existing confirmation string plus `environment: publish`. PyPI publication is
-still pending the operator's PyPI Trusted Publisher setup.
+live; future releases should reuse the same Trusted Publisher and environment
+gate.

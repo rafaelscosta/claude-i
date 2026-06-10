@@ -1,6 +1,6 @@
 # Homebrew Tap — `rafaelscosta/homebrew-claude-i`
 
-This guide documents the Homebrew tap, the current GitHub Release source strategy, the optional future PyPI URL flip, and the curl-install security posture.
+This guide documents the Homebrew tap, the current PyPI source strategy, and the curl-install security posture.
 
 ## Tap Repository
 
@@ -22,18 +22,19 @@ Current source URL strategy:
 
 | Phase | Source URL | `sha256` |
 |---|---|---|
-| **Current public formula** | `https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3.tar.gz` | `ba7d4f6fcf7608c8681c0bfa2f14fd47c992f705d1211350988ebc967838513c` |
-| **Optional future PyPI flip** | `https://files.pythonhosted.org/packages/.../claude_i-<version>.tar.gz` after `publish.yml` succeeds | regenerated from the downloaded PyPI sdist |
+| **Current public formula** | `https://files.pythonhosted.org/packages/eb/e1/77672eeb8eace8dfe7b272a1226c4ae1b558aed2bd6715c682fed0c69508/claude_i-0.2.4.tar.gz` | `ca0a6575917f945fa6cb09c858130c0ae6094500500b70d7ffd9789219c3b9dc` |
+| **Historical v0.2.3 fallback** | `https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3.tar.gz` | `ba7d4f6fcf7608c8681c0bfa2f14fd47c992f705d1211350988ebc967838513c` |
 
-The current formula still points at the v0.2.3 public GitHub Release sdist until the post-PyPI formula sync. This is deliberate:
+The current formula points at the canonical PyPI sdist:
 
-- The GitHub Release URL is portable and public; no local `file://` paths are committed.
+- PyPI is the primary public package index for `claude-i`.
+- No local `file://` paths are committed.
 - Homebrew verifies the declared `sha256` before installation.
-- The formula can be flipped to a canonical PyPI `files.pythonhosted.org` URL after the first successful PyPI publish, but that is no longer a blocker for public Homebrew installs.
+- The GitHub Release wheel/sdist remain available as fallback distribution artifacts.
 
-## Optional PyPI URL Flip
+## Release Update Procedure
 
-After `claude-i` is published to PyPI, the tap can optionally switch from the GitHub Release sdist to the PyPI-hosted sdist:
+For each future `claude-i` release, update the tap after the PyPI publish succeeds:
 
 1. Trigger the publish workflow for the current release:
    ```bash
@@ -62,8 +63,8 @@ After `claude-i` is published to PyPI, the tap can optionally switch from the Gi
    ```bash
    cd /Users/rafaelcosta/Projects/AIOX/homebrew-claude-i
    git add Formula/claude-i.rb
-   git commit -m "release: switch claude-i formula to PyPI sdist"
-   git push origin main
+   git commit -m "release: update claude-i formula to <version>"
+   git push origin <branch>
    ```
 
 ## Multi-OS Smoke (`smoke.yml`)
@@ -118,7 +119,7 @@ The install script's final verification step uses the explicit path `$HOME/.loca
 
 ### `brew install` fails with `404`
 
-Confirm the tap is reachable: `brew tap rafaelscosta/claude-i && brew info rafaelscosta/claude-i/claude-i`. If the tap repo exists but the formula `url` returns 404, this is the dev-pass pre-release URL still propagating through GitHub's CDN (typically resolves within 5-15 minutes of release creation). Retry the install in a few minutes, or pin a specific commit of the tap via `brew install ./Formula/claude-i.rb` after `git clone`.
+Confirm the tap is reachable: `brew tap rafaelscosta/claude-i && brew info rafaelscosta/claude-i/claude-i`. If the tap repo exists but the formula `url` returns 404, verify the PyPI sdist URL in the public PyPI JSON and update the tap formula to the current `files.pythonhosted.org` URL.
 
 ### Fedora minimal container missing build tools
 
