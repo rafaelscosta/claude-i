@@ -40,7 +40,7 @@ jobs:
     name: shellcheck install.sh
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install shellcheck
         run: sudo apt-get update -q && sudo apt-get install -y shellcheck
       - name: Lint install.sh
@@ -50,7 +50,7 @@ jobs:
     name: install.sh --dry-run sanity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Smoke --dry-run (no installs performed)
         run: bash install.sh --dry-run
       - name: Smoke --check on a machine without claude-i (expect exit 2)
@@ -71,10 +71,10 @@ jobs:
     # macOS smoke uses install.sh's local-path mode. The Homebrew tap-based path
     # (AC-1) is validated manually at epic close per AC-8 — see docs/guides/homebrew-tap.md.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -105,10 +105,10 @@ jobs:
     name: smoke (ubuntu-latest, install.sh --local)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -138,9 +138,9 @@ jobs:
     name: smoke (fedora:latest container, install.sh --local)
     runs-on: ubuntu-latest
     container:
-      image: fedora:latest
+      image: registry.fedoraproject.org/fedora:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install build prereqs (Fedora)
         # Fedora minimal image lacks tar, git, gcc, python3-pip; pull them in
