@@ -79,6 +79,11 @@ The runner spawns a fresh tmux session on each retry. Recommended:
 | Automation / CI scripts | `claude-i --retries 3 "<prompt>"` |
 | High-burst pipeline | `claude-i --retries 5 "<prompt>"` + 2s sleep between calls |
 
+If the final stderr contains `No Stop hook signal`, the CLI now classifies it
+as the documented Bug 5 environmental/upstream hang and suggests the retry
+level above. Run `claude-i doctor` first; if doctor is green, treat the timeout
+as host/upstream saturation rather than a payload parsing regression.
+
 ### Script-friendly first run
 
 On the very first invocation, `claude-i` prompts to install its Stop hook. In a non-TTY context (CI, redirected stdin) this would normally fail with `EOFError`. Opt into auto-install:

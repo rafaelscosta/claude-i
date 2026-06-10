@@ -706,6 +706,57 @@ def test_retries_exhaustion_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
     assert "persistent hang" in captured.err
 
 
+def test_stop_signal_timeout_without_retries_prints_bug5_guidance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """STORY-001.11 — single-shot Stop-hook timeout suggests retries."""
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(
+            cli.runner,
+            "run",
+            side_effect=TimeoutError("No Stop hook signal after 90s"),
+        ) as run_mock,
+        patch("sys.argv", ["claude-i", "hello"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+
+    assert exc.value.code == 1
+    assert run_mock.call_count == 1
+    captured = capsys.readouterr()
+    assert "documented Bug 5" in captured.err
+    assert "--retries 3" in captured.err
+    assert "claude-i doctor" in captured.err
+
+
+def test_stop_signal_timeout_after_retries_prints_exhaustion_guidance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """STORY-001.11 — exhausted retries get high-burst guidance."""
+    with (
+        patch.object(cli.deps, "check_deps"),
+        patch.object(cli.hook, "ensure_hook"),
+        patch.object(
+            cli.runner,
+            "run",
+            side_effect=TimeoutError("No Stop hook signal after 90s"),
+        ) as run_mock,
+        patch("sys.argv", ["claude-i", "--retries", "2", "hello"]),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+
+    assert exc.value.code == 1
+    assert run_mock.call_count == 3
+    captured = capsys.readouterr()
+    assert "attempt 1/3 failed" in captured.err
+    assert "All 3 attempt(s) were exhausted" in captured.err
+    assert "--retries 5" in captured.err
+    assert "environmental" in captured.err
+
+
 def test_retries_negative_treated_as_zero() -> None:
     """Defense-in-depth: a negative --retries value still attempts once.
 
