@@ -4,6 +4,24 @@ All notable changes to `claude-i` are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] — 2026-06-10
+
+### Fixed
+- Clean up late Stop-hook `.done` artifacts even when a timed-out sub-`claude`
+  writes after the runner already returned.
+- Classify final `No Stop hook signal` failures as documented environmental
+  Bug 5 and print actionable retry guidance instead of a raw timeout only.
+
+### Changed
+- Prepare the first PyPI Trusted Publishing release as `0.2.4` so the PyPI
+  artifact matches the current `main` fixes instead of the older `v0.2.3` tag.
+- Upgrade GitHub Actions to Node 24-compatible official action majors:
+  `actions/checkout@v5` and `actions/setup-python@v6`.
+- Move the Fedora smoke job to `registry.fedoraproject.org/fedora:latest` after
+  repeated Docker Hub pull timeouts during PR validation.
+- Make PyPI the primary install path for the public package once the Trusted
+  Publisher dispatch completes.
+
 ## [0.2.3] — 2026-05-19
 
 ### Fixed
@@ -97,6 +115,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the 
 
 ---
 
+[0.2.4]: https://github.com/rafaelscosta/claude-i/releases/tag/v0.2.4
 [0.2.3]: https://github.com/rafaelscosta/claude-i/releases/tag/v0.2.3
 [0.2.2]: https://github.com/rafaelscosta/claude-i/releases/tag/v0.2.2
 [0.2.1]: https://github.com/rafaelscosta/claude-i/releases/tag/v0.2.1

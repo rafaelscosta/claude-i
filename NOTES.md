@@ -241,21 +241,23 @@ same tarball content).
 
 **Decision (operator, 2026-05-19):** IP-lock REVERSED. claude-i is published publicly.
 - Repository: PUBLIC (flipped 2026-05-19)
-- PyPI publication: AUTHORIZED but DEFERRED — pending Trusted Publisher setup on pypi.org
-- Current public release: v0.2.3 (2026-05-20)
-- Public Homebrew formula: AUTHORIZED — `rafaelscosta/homebrew-claude-i` formula updated to canonical v0.2.3 GitHub Release artifact
+- PyPI publication: AUTHORIZED — first Trusted Publisher release prepared as v0.2.4
+- Current public release: v0.2.4 (2026-06-10)
+- Public Homebrew formula: AUTHORIZED — `rafaelscosta/homebrew-claude-i` formula remains on the canonical v0.2.3 GitHub Release artifact until the post-PyPI formula sync
 
 **Rationale for reversal:** v0.2.2 reached production-ready automation reliability (STORY-001.7 closed; 10/10 reliability test with `--retries 3`). v0.2.3 then fixed the long-prompt paste/Enter race and chat-title/SKIP misattribution discovered in real AIOX prompt use (STORY-001.8). The IP-protection rationale from 2026-05-18 (preserving leverage during development) no longer applies once the product is stable and useful.
 
 **Public distribution paths now active:**
-- `brew install rafaelscosta/claude-i/claude-i` (Homebrew tap — fetches GitHub Release tarball)
-- `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3-py3-none-any.whl` (GitHub Release)
-- `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3.tar.gz` (GitHub Release sdist)
-- `pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.3` (git tag)
+- `pipx install claude-i` (PyPI)
+- `uv tool install claude-i` (PyPI)
+- `brew install rafaelscosta/claude-i/claude-i` (Homebrew tap — v0.2.3 until formula sync)
+- `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.4/claude_i-0.2.4-py3-none-any.whl` (GitHub Release)
+- `pipx install https://github.com/rafaelscosta/claude-i/releases/download/v0.2.4/claude_i-0.2.4.tar.gz` (GitHub Release sdist)
+- `pipx install git+https://github.com/rafaelscosta/claude-i.git@v0.2.4` (git tag)
 
-**PyPI publication — deferred (operator action required):**
+**PyPI publication — release path:**
 
-The `publish.yml` workflow is wired for Trusted Publishing via OIDC. PyPI rejected the prior v0.2.2 dispatch with `invalid-publisher` because no Trusted Publisher was registered for the project. As of the v0.2.3 release-surface sync, PyPI still returns 404 for `claude-i`; publish the current version when the operator setup is complete. Operator setup steps:
+The `publish.yml` workflow is wired for Trusted Publishing via OIDC. PyPI rejected the prior v0.2.2 dispatch with `invalid-publisher` because no Trusted Publisher was registered for the project. As of 2026-06-10, PyPI still returns 404 for `claude-i`; the first PyPI release should publish v0.2.4, not the older v0.2.3 tag, so PyPI matches the current `main` fixes. Operator setup steps:
 
 1. Create / log into PyPI account.
 2. Visit https://pypi.org/manage/account/publishing/ and add a Pending Publisher with:
@@ -266,13 +268,14 @@ The `publish.yml` workflow is wired for Trusted Publishing via OIDC. PyPI reject
    - Environment: `publish`
 3. Re-dispatch the workflow:
    ```
-   gh workflow run publish.yml --ref v0.2.3 \
+   gh workflow run publish.yml --ref v0.2.4 \
      --field confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE \
      -R rafaelscosta/claude-i
    ```
-4. After success, update README install paths to include `pipx install claude-i` (PyPI) at the top.
+4. After success, verify `https://pypi.org/project/claude-i/` and smoke-test
+   `pipx install claude-i==0.2.4`.
 
-Until then: Homebrew + GitHub Release paths are the canonical install routes.
+Until the workflow succeeds: Homebrew + GitHub Release paths are the canonical install routes.
 
 **Guard preserved (defense-in-depth):** The `publish.yml` workflow still requires the `confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE` string for any future dispatch. This prevents accidental re-publish of stale/wrong artifacts. The guard is procedural, not policy — it gates dispatch, not the decision.
 

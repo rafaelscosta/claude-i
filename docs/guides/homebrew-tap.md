@@ -25,7 +25,7 @@ Current source URL strategy:
 | **Current public formula** | `https://github.com/rafaelscosta/claude-i/releases/download/v0.2.3/claude_i-0.2.3.tar.gz` | `ba7d4f6fcf7608c8681c0bfa2f14fd47c992f705d1211350988ebc967838513c` |
 | **Optional future PyPI flip** | `https://files.pythonhosted.org/packages/.../claude_i-<version>.tar.gz` after `publish.yml` succeeds | regenerated from the downloaded PyPI sdist |
 
-The current formula points at the public GitHub Release sdist because PyPI publication is still pending Trusted Publisher setup. This is deliberate:
+The current formula still points at the v0.2.3 public GitHub Release sdist until the post-PyPI formula sync. This is deliberate:
 
 - The GitHub Release URL is portable and public; no local `file://` paths are committed.
 - Homebrew verifies the declared `sha256` before installation.
@@ -38,14 +38,14 @@ After `claude-i` is published to PyPI, the tap can optionally switch from the Gi
 1. Trigger the publish workflow for the current release:
    ```bash
    cd /Users/rafaelcosta/Projects/AIOX/claude-i
-   gh workflow run publish.yml --ref v0.2.3 \
+   gh workflow run publish.yml --ref v0.2.4 \
      --field confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE
    ```
 2. Once the package is on PyPI, capture the canonical sdist URL and SHA:
    ```bash
-   pip download --no-deps --no-binary :all: claude-i==0.2.3 -d /tmp/claude-i-pypi/
-   shasum -a 256 /tmp/claude-i-pypi/claude_i-0.2.3.tar.gz
-   # The URL prints during pip download, usually https://files.pythonhosted.org/packages/<hash>/claude_i-0.2.3.tar.gz
+   pip download --no-deps --no-binary :all: claude-i==0.2.4 -d /tmp/claude-i-pypi/
+   shasum -a 256 /tmp/claude-i-pypi/claude_i-0.2.4.tar.gz
+   # The URL prints during pip download, usually https://files.pythonhosted.org/packages/<hash>/claude_i-0.2.4.tar.gz
    ```
 3. In `rafaelscosta/homebrew-claude-i`, edit `Formula/claude-i.rb`:
    - Set `url` to the canonical `files.pythonhosted.org` URL.
@@ -72,7 +72,7 @@ The 3-OS install smoke matrix lives in `.github/workflows/smoke.yml` and runs on
 
 - `macos-latest` — builds sdist, invokes `bash install.sh --local dist/claude_i-<version>.tar.gz`, asserts `claude-i --version` exits 0 with the expected version string.
 - `ubuntu-latest` — same flow.
-- `fedora:latest` container (running on `ubuntu-latest`) — same flow.
+- `registry.fedoraproject.org/fedora:latest` container (running on `ubuntu-latest`) — same flow.
 
 Windows native remains out of scope. A future story may add a `windows-latest` job that asserts `claude-i` exits 3 (`PLATFORM_ERROR`) on `sys.platform == "win32"`.
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-i"
-version = "0.2.3"
+version = "0.2.4"
 description = "Like `claude -p`, but driven through an interactive Claude Code session."
 readme = "README.md"
 license = { text = "MIT" }
