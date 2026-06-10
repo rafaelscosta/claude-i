@@ -20,7 +20,7 @@ the `publish.yml` workflow can be triggered manually via
    the `claude-i` project on PyPI).
 2. GitHub repository admin on `rafaelscosta/claude-i`.
 3. `claude-i` package name available on PyPI. The project endpoint still
-   returned 404 during the v0.2.3 release-surface sync, so the first PyPI
+   returned 404 during the v0.2.4 release prep, so the first PyPI
    publish should register the project.
 
 ---
@@ -73,11 +73,11 @@ access to `main` could trigger a publish.
 After Steps 1 and 2 are complete:
 
 1. Ensure `main` is up to date with the intended release version
-   (`version = "0.2.3"` in `pyproject.toml` for the current public release).
+   (`version = "0.2.4"` in `pyproject.toml` for the current public release).
 2. Trigger the workflow manually:
 
    ```bash
-   gh workflow run publish.yml --ref v0.2.3 \
+   gh workflow run publish.yml --ref v0.2.4 \
      --field confirm_release=I-CONFIRM-PUBLIC-PERMANENT-PYPI-RELEASE
    ```
 
@@ -104,11 +104,11 @@ After the publish succeeds:
 ```bash
 # pipx
 pipx install claude-i
-claude-i --version  # → claude-i 0.2.3
+claude-i --version  # → claude-i 0.2.4
 
 # uv tool
 uv tool install claude-i
-claude-i --version  # → claude-i 0.2.3
+claude-i --version  # → claude-i 0.2.4
 ```
 
 ---
@@ -145,8 +145,8 @@ activation):
    the tag and the GitHub Release before re-attempting:
 
    ```bash
-   git push --delete origin v0.2.3
-   gh release delete v0.2.3 --yes
+   git push --delete origin v0.2.4
+   gh release delete v0.2.4 --yes
    ```
 
    PyPI will not accept a re-upload of the same version-filename combination.
