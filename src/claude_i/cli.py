@@ -82,7 +82,13 @@ _KNOWN_SUBCMDS: frozenset[str] = frozenset({"doctor", "uninstall", "reap"})
 #: Long-form options that consume a value (so the value itself is not the
 #: first non-flag positional). Keep in sync with the prompt parser below.
 _FLAGS_WITH_VALUE: frozenset[str] = frozenset(
-    {"--ready-wait", "--timeout", "--permission-mode", "--output-format"}
+    {
+        "--ready-wait",
+        "--timeout",
+        "--permission-mode",
+        "--output-format",
+        "--retries",
+    }
 )
 
 _EPILOG: str = (
@@ -255,6 +261,51 @@ def _build_prompt_parser() -> argparse.ArgumentParser:
         help="extra args forwarded to claude",
     )
     return ap
+
+
+def _looks_like_stop_signal_timeout(err: BaseException) -> bool:
+    """Return True for the documented Bug 5 Stop-hook signal timeout."""
+    return "No Stop hook signal" in str(err)
+
+
+def _format_final_run_error(
+    err: BaseException,
+    retries: int,
+    total_attempts: int,
+) -> str:
+    """Format the final runner error with actionable Bug 5 guidance.
+
+    STORY-001.11 — Bug 5 is environmental/upstream when the Stop hook never
+    signals and ``doctor`` is otherwise healthy. Keep the exit code unchanged,
+    but make the final stderr line useful for operators instead of a bare
+    timeout blob.
+    """
+    message = str(err)
+    if not _looks_like_stop_signal_timeout(err):
+        return message
+
+    guidance = [
+        message,
+        "",
+        "Likely documented Bug 5: upstream Claude Code / Stop-hook signal hang "
+        "under load, not a claude-i payload parser regression.",
+    ]
+    if retries <= 0:
+        guidance.append(
+            "For automation, rerun with `--retries 3`; for high-burst "
+            "pipelines, use `--retries 5` plus a short sleep between calls."
+        )
+    else:
+        guidance.append(
+            f"All {total_attempts} attempt(s) were exhausted. For high-burst "
+            "pipelines, try `--retries 5`, add ~2s between invocations, and "
+            "rerun on an idle host if saturation is suspected."
+        )
+    guidance.append(
+        "Run `claude-i doctor` to verify tmux, claude, Stop hook, settings, "
+        "and stale sentinels; if doctor passes, treat this as environmental."
+    )
+    return "\n".join(guidance)
 
 
 def _build_subcommand_parser() -> argparse.ArgumentParser:
@@ -615,7 +666,10 @@ def main() -> None:
                 )
                 continue
             # Final attempt failed — propagate the error to exit code 1.
-            print(f"claude-i: {err}", file=sys.stderr)
+            print(
+                f"claude-i: {_format_final_run_error(err, args.retries, total_attempts)}",
+                file=sys.stderr,
+            )
             sys.exit(RUNTIME_ERROR)
 
     # Branch 1: verified-empty — empty string returned. cli.main translates

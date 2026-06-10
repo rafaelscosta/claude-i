@@ -319,6 +319,10 @@ data with ``--retries 3``: 10/10 success in pytest's reliability test.
   retry adds ~5-10s to worst-case latency; happy path is unaffected.
 - High-burst pipelines: consider ``--retries 5`` and inject ``sleep 2``
   between successive ``claude-i`` invocations.
+- STORY-001.11 updates the final stderr UX: when the terminal error contains
+  ``No Stop hook signal``, the CLI now names documented Bug 5, suggests
+  ``--retries 3`` for single-shot callers, suggests ``--retries 5`` plus
+  pacing after exhausted retries, and points operators to ``claude-i doctor``.
 
 ### Integration test surface
 
